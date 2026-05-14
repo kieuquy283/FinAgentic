@@ -1,12 +1,15 @@
-import { useState } from 'react'
+﻿import { useEffect, useMemo, useRef, useState } from 'react'
 import { sendChat } from './api'
 
-const samples = [
-  'FPT niem yet o san nao?',
-  'Gia FPT 3 thang gan day the nao?',
-  'Tinh RSI14 va SMA20 cua FPT.',
-  'Tin tuc gan day ve HPG la tich cuc hay tieu cuc?',
-  'FPT co dang theo doi khong? Neu ly do va rui ro.'
+const STORAGE_KEY = 'finance-agentic-rag-chat-history'
+const FALLBACK_TITLE = 'Đoạn chat mới'
+
+const sampleQueries = [
+  'FPT niêm yết ở sàn nào?',
+  'Giá FPT 3 tháng gần đây thế nào?',
+  'Tính RSI14 và SMA20 của FPT.',
+  'Tin tức gần đây về HPG là tích cực hay tiêu cực?',
+  'FPT có đáng theo dõi không? Nêu lý do và rủi ro.'
 ]
 
 function MetaBadge({ label, value }) {
@@ -18,26 +21,140 @@ function MetaBadge({ label, value }) {
   )
 }
 
+function makeId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function nowIso() {
+  return new Date().toISOString()
+}
+
+function toTitle(query) {
+  const text = String(query || '').trim()
+  if (!text) return FALLBACK_TITLE
+  return text.length > 64 ? `${text.slice(0, 61)}...` : text
+}
+
+function newThread() {
+  const now = nowIso()
+  return {
+    id: makeId(),
+    title: FALLBACK_TITLE,
+    createdAt: now,
+    updatedAt: now,
+    messages: []
+  }
+}
+
+function readThreads() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return [newThread()]
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed) || parsed.length === 0) return [newThread()]
+    return parsed.map((t) => ({
+      id: String(t.id || makeId()),
+      title: String(t.title || FALLBACK_TITLE),
+      createdAt: String(t.createdAt || nowIso()),
+      updatedAt: String(t.updatedAt || nowIso()),
+      messages: Array.isArray(t.messages) ? t.messages : []
+    }))
+  } catch {
+    return [newThread()]
+  }
+}
+
+function formatTime(iso) {
+  try {
+    return new Date(iso).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })
+  } catch {
+    return ''
+  }
+}
+
 export default function App() {
+  const [chatThreads, setChatThreads] = useState(() => readThreads())
+  const [activeChatId, setActiveChatId] = useState('')
   const [query, setQuery] = useState('')
-  const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const chatScrollRef = useRef(null)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(chatThreads))
+    } catch {
+      // ignore storage failures
+    }
+  }, [chatThreads])
+
+  useEffect(() => {
+    if (!activeChatId && chatThreads.length > 0) {
+      setActiveChatId(chatThreads[0].id)
+    }
+  }, [activeChatId, chatThreads])
+
+  useEffect(() => {
+    const el = chatScrollRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [activeThread?.messages, loading, error])
+
+  const activeThread = useMemo(
+    () => chatThreads.find((t) => t.id === activeChatId) || chatThreads[0],
+    [chatThreads, activeChatId]
+  )
+
+  const latestResponse = useMemo(() => {
+    if (!activeThread) return null
+    const assistant = [...activeThread.messages].reverse().find((m) => m.role === 'assistant' && m.responseMeta)
+    return assistant?.responseMeta || null
+  }, [activeThread])
+
+  const setThreadMessages = (threadId, updater) => {
+    setChatThreads((prev) =>
+      prev.map((t) => (t.id === threadId ? { ...t, ...updater(t), updatedAt: nowIso() } : t))
+    )
+  }
+
+  const createNewChat = () => {
+    const t = newThread()
+    setChatThreads((prev) => [t, ...prev])
+    setActiveChatId(t.id)
+    setQuery('')
+    setError('')
+  }
 
   const submit = async (raw) => {
     const clean = String(raw || '').trim()
-    if (!clean) {
-      setError('Vui long nhap cau hoi truoc khi gui.')
+    if (!clean || !activeThread) {
+      setError('Vui lòng nhập câu hỏi trước khi gửi.')
       return
     }
 
     setLoading(true)
     setError('')
+
+    const threadId = activeThread.id
+    const userMessage = { role: 'user', content: clean }
+    setThreadMessages(threadId, (t) => ({
+      title: t.messages.length === 0 ? toTitle(clean) : t.title,
+      messages: [...t.messages, userMessage]
+    }))
+
     try {
       const data = await sendChat(clean)
-      setResult(data)
+      const assistantMessage = {
+        role: 'assistant',
+        content: data?.answer || 'N/A',
+        responseMeta: data || null
+      }
+      setThreadMessages(threadId, (t) => ({
+        messages: [...t.messages, assistantMessage]
+      }))
+      setQuery('')
     } catch (e) {
-      setError(String(e?.message || 'Khong the ket noi backend. Kiem tra FastAPI server roi thu lai.'))
+      setError(String(e?.message || 'Không thể kết nối backend. Kiểm tra FastAPI server rồi thử lại.'))
     } finally {
       setLoading(false)
     }
@@ -46,16 +163,25 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar panel">
-        <h1 className="brand">FinAgentic</h1>
-        <p className="subtitle">Vietnamese stock analysis assistant</p>
-        <div className="status-row">
-          <span className={`badge ${loading ? 'badge-info' : 'badge-ok'}`}>{loading ? 'Dang phan tich...' : 'San sang'}</span>
-        </div>
-        <h2 className="section-title">Cau hoi mau</h2>
-        <div className="samples">
-          {samples.map((q) => (
-            <button key={q} className="demo-btn" onClick={() => submit(q)} disabled={loading}>
-              {q}
+        <h1 className="brand">Finance Agentic RAG</h1>
+        <button type="button" className="new-chat-btn" onClick={createNewChat}>+ Đoạn chat mới</button>
+
+        <h2 className="section-title">Lịch sử chat</h2>
+        <div className="history-list" role="list">
+          {chatThreads.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="listitem"
+              className={`history-item ${t.id === activeThread?.id ? 'history-item-active' : ''}`}
+              aria-current={t.id === activeThread?.id ? 'page' : undefined}
+              onClick={() => {
+                setActiveChatId(t.id)
+                setError('')
+              }}
+            >
+              <div className="history-title">{t.title || FALLBACK_TITLE}</div>
+              <div className="history-time muted">{formatTime(t.updatedAt)}</div>
             </button>
           ))}
         </div>
@@ -67,31 +193,40 @@ export default function App() {
           <span className="muted">Deep analysis dashboard</span>
         </header>
 
-        <section className="workspace chat-scroll-area" aria-live="polite">
-          {!result && !loading && !error && (
+        <section ref={chatScrollRef} className="workspace chat-scroll-area" aria-live="polite">
+          {activeThread?.messages?.length === 0 && !loading && !error && (
             <div className="empty-state">
-              <p>Hoi thu mot cau ve co phieu Viet Nam.</p>
-              <p className="muted">Vi du: Tinh RSI14 va SMA20 cua FPT.</p>
+              <p>Hỏi thử một câu về cổ phiếu Việt Nam.</p>
+              <div className="sample-row">
+                {sampleQueries.map((q) => (
+                  <button key={q} type="button" className="sample-chip" onClick={() => submit(q)}>
+                    {q}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
           {error && <div className="error-card">{error}</div>}
-          {loading && <div className="loading-card">Dang phan tich...</div>}
+          {loading && <div className="loading-card">Đang phân tích...</div>}
 
-          {result && (
-            <>
-              <div className="bubble user-bubble">
-                <div className="bubble-label">Ban</div>
-                <div>{result.query || query || 'N/A'}</div>
-              </div>
-
-              <article className="bubble assistant-bubble">
-                <div className="bubble-label">Tro ly</div>
-                <p className="answer">{result.answer || 'N/A'}</p>
-              </article>
-            </>
-          )}
+          {(activeThread?.messages || []).map((m, i) => (
+            <article key={`${m.role}-${i}`} className={`bubble ${m.role === 'user' ? 'user-bubble' : 'assistant-bubble'}`}>
+              <div className="bubble-label">{m.role === 'user' ? 'Bạn' : 'Trợ lý'}</div>
+              <p className="answer">{m.content || 'N/A'}</p>
+            </article>
+          ))}
         </section>
+
+        <div className="sample-strip-wrap">
+          <div className="sample-strip">
+            {sampleQueries.map((q) => (
+              <button key={`strip-${q}`} type="button" className="sample-chip" onClick={() => submit(q)} disabled={loading}>
+                {q}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <form
           className="composer chat-composer"
@@ -100,38 +235,38 @@ export default function App() {
             submit(query)
           }}
         >
-          <label htmlFor="query-input" className="sr-only">Nhap cau hoi</label>
+          <label htmlFor="query-input" className="sr-only">Nhập câu hỏi</label>
           <input
             id="query-input"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Nhap cau hoi ve co phieu Viet Nam..."
+            placeholder="Nhập câu hỏi về cổ phiếu Việt Nam..."
             disabled={loading}
           />
           <button type="submit" className="send-btn" disabled={loading || !query.trim()}>
-            {loading ? 'Dang phan tich...' : 'Gui'}
+            {loading ? 'Đang phân tích...' : 'Gửi'}
           </button>
         </form>
       </main>
 
       <aside className="details panel">
-        <h2 className="section-title">Phan hoi</h2>
+        <h2 className="section-title">Phản hồi</h2>
         <div className="details-scroll-area">
           <div className="meta-grid">
-            <MetaBadge label="Y dinh" value={result?.intent} />
-            <MetaBadge label="Tuyen xu ly" value={result?.route} />
-            <MetaBadge label="Do tin cay" value={result?.confidence} />
-            <MetaBadge label="Do tre" value={typeof result?.latency_ms === 'number' ? `${result.latency_ms} ms` : 'N/A'} />
+            <MetaBadge label="Ý định" value={latestResponse?.intent} />
+            <MetaBadge label="Tuyến xử lý" value={latestResponse?.route} />
+            <MetaBadge label="Độ tin cậy" value={latestResponse?.confidence} />
+            <MetaBadge label="Độ trễ" value={typeof latestResponse?.latency_ms === 'number' ? `${latestResponse.latency_ms} ms` : 'N/A'} />
           </div>
 
-          <h3 className="section-title">Nguon bang chung</h3>
+          <h3 className="section-title">Nguồn bằng chứng</h3>
           <div className="stack">
-            {!result?.evidence?.length && <div className="empty-mini">Chua co bang chung cho cau tra loi nay.</div>}
-            {(result?.evidence || []).map((e, i) => (
+            {!latestResponse?.evidence?.length && <div className="empty-mini">Chưa có bằng chứng cho câu trả lời này.</div>}
+            {(latestResponse?.evidence || []).map((e, i) => (
               <div className="evidence-item" key={`${e.source}-${i}`}>
                 <div className="evidence-head">
                   <span className="badge">{e.source_type || 'N/A'}</span>
-                  <span className="muted">{e.ticker || 'N/A'} � {e.date || 'N/A'}</span>
+                  <span className="muted">{e.ticker || 'N/A'} • {e.date || 'N/A'}</span>
                 </div>
                 <div className="evidence-source">{e.source || 'N/A'}</div>
                 <div>{e.content || 'N/A'}</div>
@@ -140,18 +275,19 @@ export default function App() {
           </div>
 
           <h3 className="section-title">Guardrails</h3>
-          <div className={`guardrail ${result?.guardrails?.passed === false ? 'guardrail-warn' : ''}`}>
-            <MetaBadge label="Trang thai" value={result?.guardrails?.passed === false ? 'warning' : 'passed'} />
+          <div className={`guardrail ${latestResponse?.guardrails?.passed === false ? 'guardrail-warn' : ''}`}>
+            <MetaBadge label="Trạng thái" value={latestResponse?.guardrails?.passed === false ? 'warning' : 'passed'} />
             <div className="stack">
-              {(result?.guardrails?.warnings || []).length === 0 && <div className="empty-mini">Khong co canh bao.</div>}
-              {(result?.guardrails?.warnings || []).map((w, i) => (
-                <div key={i} className="warning-item">� {w}</div>
+              {(latestResponse?.guardrails?.warnings || []).length === 0 && <div className="empty-mini">Không có cảnh báo.</div>}
+              {(latestResponse?.guardrails?.warnings || []).map((w, i) => (
+                <div key={i} className="warning-item">• {w}</div>
               ))}
             </div>
-            <div className="disclaimer">{result?.guardrails?.disclaimer || 'N/A'}</div>
+            <div className="disclaimer">{latestResponse?.guardrails?.disclaimer || 'N/A'}</div>
           </div>
         </div>
       </aside>
     </div>
   )
 }
+

@@ -106,6 +106,12 @@ input {
   min-height: 0;
 }
 
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .main {
   display: flex;
   flex-direction: column;
@@ -259,12 +265,47 @@ input {
   cursor: not-allowed;
 }
 
-.samples {
+.new-chat-btn {
+  min-height: 40px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+  color: var(--color-text-primary);
+  text-align: left;
+  padding: 0 var(--space-5);
+}
+
+.history-list {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   overflow-y: auto;
   min-height: 0;
+}
+
+.history-item {
+  border: 1px solid var(--color-border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+  padding: var(--space-4);
+  text-align: left;
+}
+
+.history-item-active {
+  border-color: var(--color-primary);
+  background: rgba(77, 107, 254, 0.18);
+  color: var(--color-text-primary);
+}
+
+.history-title {
+  font-size: var(--font-size-sm);
+  line-height: 1.35;
+  margin-bottom: var(--space-1);
+}
+
+.history-time {
+  font-size: var(--font-size-xs);
 }
 
 .demo-btn {
@@ -328,6 +369,32 @@ input {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+.sample-row,
+.sample-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.sample-strip-wrap {
+  border-top: 1px solid var(--color-border-muted);
+  padding: var(--space-3) var(--space-6);
+  flex-shrink: 0;
+  background: var(--color-surface-raised);
+}
+
+.sample-chip {
+  border: 1px solid var(--color-border-muted);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+  padding: 4px var(--space-4);
+}
+
+.sample-chip:hover:not(:disabled) {
+  background: var(--color-surface-hover);
 }
 
 .details {
@@ -451,6 +518,10 @@ input {
   .composer {
     grid-template-columns: 1fr;
     padding: var(--space-4);
+  }
+
+  .sample-strip-wrap {
+    padding: var(--space-3) var(--space-4);
   }
 
   .send-btn {
