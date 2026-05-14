@@ -35,6 +35,12 @@ function toTitle(query) {
   return text.length > 64 ? `${text.slice(0, 61)}...` : text
 }
 
+function statusLabel(status) {
+  if (status === 'loading') return 'Đang xử lý'
+  if (status === 'error') return 'Lỗi'
+  return 'Thành công'
+}
+
 function newThread() {
   const now = nowIso()
   return {
@@ -42,7 +48,88 @@ function newThread() {
     title: FALLBACK_TITLE,
     createdAt: now,
     updatedAt: now,
-    messages: []
+    pairs: [],
+    selectedPairId: null
+  }
+}
+
+function pairFromMessages(messages) {
+  const pairs = []
+  let pendingQuestion = null
+  for (const m of messages) {
+    if (m?.role === 'user') {
+      if (pendingQuestion) {
+        pairs.push({
+          id: makeId(),
+          question: pendingQuestion,
+          answer: '',
+          status: 'success',
+          errorMessage: '',
+          response: null,
+          createdAt: nowIso(),
+          updatedAt: nowIso()
+        })
+      }
+      pendingQuestion = String(m.content || '')
+    } else if (m?.role === 'assistant') {
+      if (!pendingQuestion) continue
+      pairs.push({
+        id: makeId(),
+        question: pendingQuestion,
+        answer: String(m.content || ''),
+        status: 'success',
+        errorMessage: '',
+        response: m.responseMeta || null,
+        createdAt: nowIso(),
+        updatedAt: nowIso()
+      })
+      pendingQuestion = null
+    }
+  }
+  if (pendingQuestion) {
+    pairs.push({
+      id: makeId(),
+      question: pendingQuestion,
+      answer: '',
+      status: 'success',
+      errorMessage: '',
+      response: null,
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    })
+  }
+  return pairs
+}
+
+function migrateThread(rawThread) {
+  const now = nowIso()
+  const id = String(rawThread?.id || makeId())
+  let pairs = []
+
+  if (Array.isArray(rawThread?.pairs)) {
+    pairs = rawThread.pairs.map((p) => ({
+      id: String(p?.id || makeId()),
+      question: String(p?.question || ''),
+      answer: String(p?.answer || ''),
+      status: p?.status === 'loading' || p?.status === 'error' || p?.status === 'success' ? p.status : 'success',
+      errorMessage: String(p?.errorMessage || ''),
+      response: p?.response || null,
+      createdAt: String(p?.createdAt || now),
+      updatedAt: String(p?.updatedAt || now)
+    }))
+  } else if (Array.isArray(rawThread?.messages)) {
+    pairs = pairFromMessages(rawThread.messages)
+  }
+
+  const selectedPairId = pairs.find((p) => p.id === rawThread?.selectedPairId)?.id || pairs[0]?.id || null
+
+  return {
+    id,
+    title: String(rawThread?.title || FALLBACK_TITLE),
+    createdAt: String(rawThread?.createdAt || now),
+    updatedAt: String(rawThread?.updatedAt || now),
+    pairs,
+    selectedPairId
   }
 }
 
@@ -52,13 +139,8 @@ function readThreads() {
     if (!raw) return [newThread()]
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed) || parsed.length === 0) return [newThread()]
-    return parsed.map((t) => ({
-      id: String(t.id || makeId()),
-      title: String(t.title || FALLBACK_TITLE),
-      createdAt: String(t.createdAt || nowIso()),
-      updatedAt: String(t.updatedAt || nowIso()),
-      messages: Array.isArray(t.messages) ? t.messages : []
-    }))
+    const migrated = parsed.map(migrateThread)
+    return migrated.length ? migrated : [newThread()]
   } catch {
     return [newThread()]
   }
@@ -76,8 +158,8 @@ export default function App() {
   const [chatThreads, setChatThreads] = useState(() => readThreads())
   const [activeChatId, setActiveChatId] = useState('')
   const [query, setQuery] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [inputError, setInputError] = useState('')
   const chatScrollRef = useRef(null)
 
   useEffect(() => {
@@ -99,22 +181,24 @@ export default function App() {
     [chatThreads, activeChatId]
   )
 
-  const latestResponse = useMemo(() => {
+  const selectedPair = useMemo(() => {
     if (!activeThread) return null
-    const assistant = [...activeThread.messages].reverse().find((m) => m.role === 'assistant' && m.responseMeta)
-    return assistant?.responseMeta || null
+    return activeThread.pairs.find((p) => p.id === activeThread.selectedPairId) || activeThread.pairs[0] || null
   }, [activeThread])
 
   useEffect(() => {
     const el = chatScrollRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
-  }, [activeThread, loading, error])
+  }, [activeThread, submitting, inputError])
 
-  const setThreadMessages = (threadId, updater) => {
-    setChatThreads((prev) =>
-      prev.map((t) => (t.id === threadId ? { ...t, ...updater(t), updatedAt: nowIso() } : t))
-    )
+  const updateThread = (threadId, updater) => {
+    setChatThreads((prev) => prev.map((t) => (t.id === threadId ? { ...t, ...updater(t), updatedAt: nowIso() } : t)))
+  }
+
+  const selectPair = (pairId) => {
+    if (!activeThread) return
+    updateThread(activeThread.id, (t) => ({ selectedPairId: pairId }))
   }
 
   const createNewChat = () => {
@@ -122,43 +206,77 @@ export default function App() {
     setChatThreads((prev) => [t, ...prev])
     setActiveChatId(t.id)
     setQuery('')
-    setError('')
+    setInputError('')
   }
 
   const submit = async (raw) => {
     const clean = String(raw || '').trim()
     if (!clean || !activeThread) {
-      setError('Vui lòng nhập câu hỏi trước khi gửi.')
+      setInputError('Vui lòng nhập câu hỏi trước khi gửi.')
       return
     }
 
-    setLoading(true)
-    setError('')
+    setSubmitting(true)
+    setInputError('')
 
-    const threadId = activeThread.id
-    const userMessage = { role: 'user', content: clean }
-    setThreadMessages(threadId, (t) => ({
-      title: t.messages.length === 0 ? toTitle(clean) : t.title,
-      messages: [...t.messages, userMessage]
+    const pairId = makeId()
+    const startedAt = nowIso()
+
+    updateThread(activeThread.id, (t) => ({
+      title: t.pairs.length === 0 ? toTitle(clean) : t.title,
+      selectedPairId: pairId,
+      pairs: [
+        ...t.pairs,
+        {
+          id: pairId,
+          question: clean,
+          answer: '',
+          status: 'loading',
+          errorMessage: '',
+          response: null,
+          createdAt: startedAt,
+          updatedAt: startedAt
+        }
+      ]
     }))
 
     try {
       const data = await sendChat(clean)
-      const assistantMessage = {
-        role: 'assistant',
-        content: data?.answer || 'N/A',
-        responseMeta: data || null
-      }
-      setThreadMessages(threadId, (t) => ({
-        messages: [...t.messages, assistantMessage]
+      updateThread(activeThread.id, (t) => ({
+        pairs: t.pairs.map((p) =>
+          p.id === pairId
+            ? {
+                ...p,
+                status: 'success',
+                answer: String(data?.answer || ''),
+                response: data || null,
+                errorMessage: '',
+                updatedAt: nowIso()
+              }
+            : p
+        )
       }))
       setQuery('')
     } catch (e) {
-      setError(String(e?.message || 'Không thể kết nối backend. Kiểm tra FastAPI server rồi thử lại.'))
+      const msg = String(e?.message || 'Không thể kết nối backend. Kiểm tra FastAPI server rồi thử lại.')
+      updateThread(activeThread.id, (t) => ({
+        pairs: t.pairs.map((p) =>
+          p.id === pairId
+            ? {
+                ...p,
+                status: 'error',
+                errorMessage: msg,
+                updatedAt: nowIso()
+              }
+            : p
+        )
+      }))
     } finally {
-      setLoading(false)
+      setSubmitting(false)
     }
   }
+
+  const currentResponse = selectedPair?.response || null
 
   return (
     <div className="app-shell">
@@ -177,7 +295,7 @@ export default function App() {
               aria-current={t.id === activeThread?.id ? 'page' : undefined}
               onClick={() => {
                 setActiveChatId(t.id)
-                setError('')
+                setInputError('')
               }}
             >
               <div className="history-title">{t.title || FALLBACK_TITLE}</div>
@@ -194,7 +312,7 @@ export default function App() {
         </header>
 
         <section ref={chatScrollRef} className="workspace chat-scroll-area" aria-live="polite">
-          {activeThread?.messages?.length === 0 && !loading && !error && (
+          {activeThread?.pairs?.length === 0 && !submitting && !inputError && (
             <div className="empty-state">
               <p>Hỏi thử một câu về cổ phiếu Việt Nam.</p>
               <div className="sample-row">
@@ -207,21 +325,43 @@ export default function App() {
             </div>
           )}
 
-          {error && <div className="error-card">{error}</div>}
-          {loading && <div className="loading-card">Đang phân tích...</div>}
+          {inputError && <div className="error-card">{inputError}</div>}
 
-          {(activeThread?.messages || []).map((m, i) => (
-            <article key={`${m.role}-${i}`} className={`bubble ${m.role === 'user' ? 'user-bubble' : 'assistant-bubble'}`}>
-              <div className="bubble-label">{m.role === 'user' ? 'Bạn' : 'Trợ lý'}</div>
-              <p className="answer">{m.content || 'N/A'}</p>
-            </article>
-          ))}
+          {(activeThread?.pairs || []).map((pair) => {
+            const isSelected = pair.id === activeThread?.selectedPairId
+            return (
+              <div key={pair.id} className={`pair-block ${isSelected ? 'pair-block-selected' : ''}`}>
+                <button
+                  type="button"
+                  className={`bubble user-bubble qa-button ${isSelected ? 'qa-selected' : ''}`}
+                  aria-selected={isSelected}
+                  onClick={() => selectPair(pair.id)}
+                >
+                  <div className="bubble-label">Bạn</div>
+                  <p className="answer">{pair.question || 'N/A'}</p>
+                </button>
+
+                <button
+                  type="button"
+                  className={`bubble assistant-bubble qa-button ${isSelected ? 'qa-selected' : ''}`}
+                  aria-selected={isSelected}
+                  onClick={() => selectPair(pair.id)}
+                >
+                  <div className="bubble-label">Trợ lý</div>
+                  <div className="pair-head-row">
+                    <span className={`pair-status pair-status-${pair.status}`}>{statusLabel(pair.status)}</span>
+                  </div>
+                  <p className="answer">{pair.answer || (pair.status === 'loading' ? 'Đang phân tích...' : pair.status === 'error' ? pair.errorMessage : 'N/A')}</p>
+                </button>
+              </div>
+            )
+          })}
         </section>
 
         <div className="sample-strip-wrap">
           <div className="sample-strip">
             {sampleQueries.map((q) => (
-              <button key={`strip-${q}`} type="button" className="sample-chip" onClick={() => submit(q)} disabled={loading}>
+              <button key={`strip-${q}`} type="button" className="sample-chip" onClick={() => submit(q)} disabled={submitting}>
                 {q}
               </button>
             ))}
@@ -241,53 +381,62 @@ export default function App() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Nhập câu hỏi về cổ phiếu Việt Nam..."
-            disabled={loading}
+            disabled={submitting}
           />
-          <button type="submit" className="send-btn" disabled={loading || !query.trim()}>
-            {loading ? 'Đang phân tích...' : 'Gửi'}
+          <button type="submit" className="send-btn" disabled={submitting || !query.trim()}>
+            {submitting ? 'Đang phân tích...' : 'Gửi'}
           </button>
         </form>
       </main>
 
       <aside className="details panel">
-        <h2 className="section-title">Phản hồi</h2>
+        <h2 className="section-title">Phản hồi của câu hỏi đang chọn</h2>
         <div className="details-scroll-area">
-          <div className="meta-grid">
-            <MetaBadge label="Ý định" value={latestResponse?.intent} />
-            <MetaBadge label="Tuyến xử lý" value={latestResponse?.route} />
-            <MetaBadge label="Độ tin cậy" value={latestResponse?.confidence} />
-            <MetaBadge label="Độ trễ" value={typeof latestResponse?.latency_ms === 'number' ? `${latestResponse.latency_ms} ms` : 'N/A'} />
-          </div>
+          {!selectedPair && <div className="empty-mini">Chọn một câu hỏi hoặc câu trả lời để xem phản hồi.</div>}
 
-          <h3 className="section-title">Nguồn bằng chứng</h3>
-          <div className="stack">
-            {!latestResponse?.evidence?.length && <div className="empty-mini">Chưa có bằng chứng cho câu trả lời này.</div>}
-            {(latestResponse?.evidence || []).map((e, i) => (
-              <div className="evidence-item" key={`${e.source}-${i}`}>
-                <div className="evidence-head">
-                  <span className="badge">{e.source_type || 'N/A'}</span>
-                  <span className="muted">{e.ticker || 'N/A'} • {e.date || 'N/A'}</span>
-                </div>
-                <div className="evidence-source">{e.source || 'N/A'}</div>
-                <div>{e.content || 'N/A'}</div>
+          {selectedPair && (
+            <>
+              <div className="meta-grid">
+                <MetaBadge label="Trạng thái" value={statusLabel(selectedPair.status)} />
+                <MetaBadge label="Ý định" value={currentResponse?.intent} />
+                <MetaBadge label="Tuyến xử lý" value={currentResponse?.route} />
+                <MetaBadge label="Độ tin cậy" value={currentResponse?.confidence} />
+                <MetaBadge label="Độ trễ" value={typeof currentResponse?.latency_ms === 'number' ? `${currentResponse.latency_ms} ms` : 'N/A'} />
               </div>
-            ))}
-          </div>
 
-          <h3 className="section-title">Guardrails</h3>
-          <div className={`guardrail ${latestResponse?.guardrails?.passed === false ? 'guardrail-warn' : ''}`}>
-            <MetaBadge label="Trạng thái" value={latestResponse?.guardrails?.passed === false ? 'warning' : 'passed'} />
-            <div className="stack">
-              {(latestResponse?.guardrails?.warnings || []).length === 0 && <div className="empty-mini">Không có cảnh báo.</div>}
-              {(latestResponse?.guardrails?.warnings || []).map((w, i) => (
-                <div key={i} className="warning-item">• {w}</div>
-              ))}
-            </div>
-            <div className="disclaimer">{latestResponse?.guardrails?.disclaimer || 'N/A'}</div>
-          </div>
+              {selectedPair.status === 'loading' && <div className="loading-card">Đang xử lý phản hồi cho câu hỏi này...</div>}
+              {selectedPair.status === 'error' && <div className="error-card">{selectedPair.errorMessage || 'Lỗi không xác định.'}</div>}
+
+              <h3 className="section-title">Nguồn bằng chứng</h3>
+              <div className="stack">
+                {!currentResponse?.evidence?.length && <div className="empty-mini">Chưa có bằng chứng cho câu trả lời này.</div>}
+                {(currentResponse?.evidence || []).map((e, i) => (
+                  <div className="evidence-item" key={`${e.source}-${i}`}>
+                    <div className="evidence-head">
+                      <span className="badge">{e.source_type || 'N/A'}</span>
+                      <span className="muted">{e.ticker || 'N/A'} • {e.date || 'N/A'}</span>
+                    </div>
+                    <div className="evidence-source">{e.source || 'N/A'}</div>
+                    <div>{e.content || 'N/A'}</div>
+                  </div>
+                ))}
+              </div>
+
+              <h3 className="section-title">Guardrails</h3>
+              <div className={`guardrail ${currentResponse?.guardrails?.passed === false ? 'guardrail-warn' : ''}`}>
+                <MetaBadge label="Trạng thái" value={currentResponse?.guardrails?.passed === false ? 'warning' : 'passed'} />
+                <div className="stack">
+                  {(currentResponse?.guardrails?.warnings || []).length === 0 && <div className="empty-mini">Không có cảnh báo.</div>}
+                  {(currentResponse?.guardrails?.warnings || []).map((w, i) => (
+                    <div key={i} className="warning-item">• {w}</div>
+                  ))}
+                </div>
+                <div className="disclaimer">{currentResponse?.guardrails?.disclaimer || 'N/A'}</div>
+              </div>
+            </>
+          )}
         </div>
       </aside>
     </div>
   )
 }
-
