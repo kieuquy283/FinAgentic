@@ -10,6 +10,9 @@
 ## Required env vars
 - `PYTHON_VERSION=3.11.9`
 - `FRONTEND_ORIGINS=https://your-vercel-app.vercel.app`
+- `QWEN_API_KEY=<your_key>`
+- `QWEN_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1`
+- `QWEN_MODEL=qwen-plus`
 
 Optional:
 - `FRONTEND_ORIGIN=https://your-vercel-app.vercel.app`
