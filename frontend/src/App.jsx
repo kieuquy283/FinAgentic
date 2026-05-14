@@ -94,12 +94,6 @@ export default function App() {
     }
   }, [activeChatId, chatThreads])
 
-  useEffect(() => {
-    const el = chatScrollRef.current
-    if (!el) return
-    el.scrollTop = el.scrollHeight
-  }, [activeThread?.messages, loading, error])
-
   const activeThread = useMemo(
     () => chatThreads.find((t) => t.id === activeChatId) || chatThreads[0],
     [chatThreads, activeChatId]
@@ -110,6 +104,12 @@ export default function App() {
     const assistant = [...activeThread.messages].reverse().find((m) => m.role === 'assistant' && m.responseMeta)
     return assistant?.responseMeta || null
   }, [activeThread])
+
+  useEffect(() => {
+    const el = chatScrollRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [activeThread, loading, error])
 
   const setThreadMessages = (threadId, updater) => {
     setChatThreads((prev) =>
