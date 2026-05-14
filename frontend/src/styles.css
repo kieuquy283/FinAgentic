@@ -61,8 +61,10 @@
 html,
 body,
 #root {
+  height: 100%;
   margin: 0;
   min-height: 100%;
+  overflow: hidden;
   background: var(--color-surface-base);
   color: var(--color-text-primary);
   font-family: var(--font-family-primary);
@@ -82,11 +84,13 @@ input {
 
 .app-shell {
   min-height: 100vh;
+  height: 100vh;
   display: grid;
   gap: var(--space-5);
   padding: var(--space-5);
   grid-template-columns: 280px minmax(0, 1fr) 360px;
   background: radial-gradient(circle at top right, #10172a 0%, var(--color-surface-base) 42%);
+  overflow: hidden;
 }
 
 .panel {
@@ -99,12 +103,15 @@ input {
 .sidebar,
 .details {
   padding: var(--space-6);
+  min-height: 0;
 }
 
 .main {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .topbar {
@@ -145,11 +152,13 @@ input {
 
 .workspace {
   flex: 1;
-  min-height: 260px;
+  min-height: 0;
   padding: var(--space-6);
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
+  overflow-y: auto;
+  padding-bottom: calc(var(--space-7) + 52px);
 }
 
 .empty-state,
@@ -207,6 +216,11 @@ input {
   gap: var(--space-3);
   padding: var(--space-5) var(--space-6);
   border-top: 1px solid var(--color-border-muted);
+  flex-shrink: 0;
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  background: var(--color-surface-raised);
 }
 
 .composer input {
@@ -249,6 +263,8 @@ input {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .demo-btn {
@@ -312,6 +328,17 @@ input {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+.details {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.details-scroll-area {
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .evidence-item {
@@ -391,6 +418,13 @@ input {
 }
 
 @media (max-width: 767px) {
+  html,
+  body,
+  #root,
+  .app-shell {
+    height: 100dvh;
+  }
+
   .app-shell {
     grid-template-columns: 1fr;
     padding: var(--space-3);
