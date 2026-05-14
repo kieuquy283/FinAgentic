@@ -1,16 +1,31 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import os
 import time
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.cache import get_cache, normalize_query, set_cache
 from app.router import route_query
 from app.schemas import ChatRequest, ChatResponse, EvidenceItem
-from app.services.evidence_aggregator import EvidenceAggregator
 from app.services.advisory_service import AdvisoryService
-from app.services.guardrails import apply_guardrails
-from app.cache import get_cache, set_cache, normalize_query
-from app.services.guardrails import DISCLAIMER
+from app.services.evidence_aggregator import EvidenceAggregator
+from app.services.guardrails import DISCLAIMER, apply_guardrails
+
+
+def _cors_origins() -> list[str]:
+    origins = {"http://localhost:5173"}
+    single = os.getenv("FRONTEND_ORIGIN", "").strip()
+    if single:
+        origins.add(single)
+    many = os.getenv("FRONTEND_ORIGINS", "").strip()
+    if many:
+        for item in many.split(","):
+            val = item.strip()
+            if val:
+                origins.add(val)
+    return sorted(origins)
 
 
 def _safe_response(query: str, intent: str, route: str, answer: str, warnings: list[str], latency_ms: int) -> ChatResponse:
@@ -29,10 +44,11 @@ def _safe_response(query: str, intent: str, route: str, answer: str, warnings: l
         latency_ms=latency_ms,
     )
 
+
 app = FastAPI(title="Hybrid Agentic RAG - VN Stock MVP")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

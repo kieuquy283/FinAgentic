@@ -132,6 +132,19 @@ cp frontend/.env.example frontend/.env
 # set VITE_API_BASE_URL if backend is not on http://127.0.0.1:8000
 ```
 
+## Deployment
+- Render backend guide: `docs/deployment_render.md`
+- Vercel frontend guide: `docs/deployment_vercel.md`
+
+Render backend quick settings:
+- Root Directory: `backend`
+- Build Command: `pip install -r requirements.txt`
+- Start Command: `bash start.sh`
+- Health Check Path: `/health`
+- Env vars:
+  - `PYTHON_VERSION=3.11.9`
+  - `FRONTEND_ORIGINS=https://your-vercel-app.vercel.app`
+
 ## Demo Queries
 Run in this order:
 1. FPT niem yet o san nao?
