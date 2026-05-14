@@ -229,3 +229,13 @@ __marimo__/
 *.env
 *.env.*
 !.env.example
+
+.venv/
+frontend/node_modules/
+node_modules/
+.env
+.env.*
+*.env
+*.md
+!README.md
+!.env.example
