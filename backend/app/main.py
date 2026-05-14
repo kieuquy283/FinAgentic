@@ -6,9 +6,11 @@ import time
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 from app.cache import get_cache, normalize_query, set_cache
 from app.router import route_query
+from app import scheduler as scheduler_mod
 from app.schemas import ChatRequest, ChatResponse, EvidenceItem
 from app.services.advisory_service import AdvisoryService
 from app.services.evidence_aggregator import EvidenceAggregator
@@ -69,6 +71,41 @@ def root():
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
     return Response(status_code=204)
+
+
+class RefreshRequest(BaseModel):
+    tickers: list[str] | None = None
+
+
+@app.on_event("startup")
+def startup_event() -> None:
+    try:
+        scheduler_mod.start_daily_refresh_scheduler()
+    except Exception:
+        # Never block API startup
+        pass
+
+
+@app.on_event("shutdown")
+def shutdown_event() -> None:
+    try:
+        scheduler_mod.stop_daily_refresh_scheduler()
+    except Exception:
+        pass
+
+
+@app.post("/admin/refresh-data")
+def admin_refresh_data(req: RefreshRequest | None = None):
+    tickers = req.tickers if req else None
+    try:
+        return scheduler_mod.run_refresh_job(tickers=tickers)
+    except Exception as exc:  # noqa: BLE001
+        return {"job": "daily_refresh", "status": "error", "message": str(exc)}
+
+
+@app.get("/admin/refresh-status")
+def admin_refresh_status():
+    return scheduler_mod.refresh_status()
 
 
 @app.post("/chat", response_model=ChatResponse)

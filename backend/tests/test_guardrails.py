@@ -1,4 +1,5 @@
-﻿from app.services.guardrails import apply_guardrails
+﻿from app.schemas import EvidenceItem
+from app.services.guardrails import apply_guardrails
 
 
 def test_empty_evidence_triggers_warning():
@@ -22,3 +23,9 @@ def test_passed_true_when_evidence_exists():
     }]
     g = apply_guardrails("company_info", "demo answer", ev, False)
     assert g.passed is True
+
+
+def test_runtime_stale_warning_propagates():
+    ev = [EvidenceItem(source="sqlite", source_type="db", ticker="FPT", date="2026-05-14", content="facts")]
+    g = apply_guardrails("market_data", "answer", ev, True, runtime_warnings=["Price data is stale."])
+    assert any("stale" in w.lower() for w in g.warnings)
