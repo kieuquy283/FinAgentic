@@ -1,0 +1,7 @@
+﻿[
+  {"id":"news_hpg_1","ticker":"HPG","date":"2026-05-10","source":"mock_news","content":"HPG doi mat ap luc bien loi nhuan khi gia nguyen lieu tang."},
+  {"id":"news_hpg_2","ticker":"HPG","date":"2026-05-08","source":"mock_news","content":"San luong tieu thu HPG phuc hoi nhe, tam ly thi truong trung lap."},
+  {"id":"news_hpg_3","ticker":"HPG","date":"2026-05-06","source":"mock_news","content":"Rui ro canh tranh gia thep khien trien vong ngan han tieu cuc."},
+  {"id":"news_fpt_1","ticker":"FPT","date":"2026-05-11","source":"mock_news","content":"Mang xuat khau phan mem cua FPT tang truong tot va loi nhuan on dinh."},
+  {"id":"news_fpt_2","ticker":"FPT","date":"2026-05-09","source":"mock_news","content":"FPT ky them hop dong lon, ky vong tich cuc cho quy toi."}
+]

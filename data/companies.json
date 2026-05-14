@@ -1,0 +1,6 @@
+﻿[
+  {"ticker":"FPT","company_name":"CTCP FPT","exchange":"HOSE","sector":"Technology","description":"Doanh nghiep cong nghe va dich vu CNTT"},
+  {"ticker":"HPG","company_name":"CTCP Tap doan Hoa Phat","exchange":"HOSE","sector":"Materials","description":"Doanh nghiep thep va vat lieu xay dung"},
+  {"ticker":"VCB","company_name":"Vietcombank","exchange":"HOSE","sector":"Banking","description":"Ngan hang thuong mai"},
+  {"ticker":"VNM","company_name":"Vinamilk","exchange":"HOSE","sector":"Consumer Staples","description":"San xuat sua va thuc pham"}
+]
