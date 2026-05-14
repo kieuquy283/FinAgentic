@@ -26,6 +26,13 @@ class EvidenceAggregator:
         ctx = AnalyticalContext(ticker=ticker, evidence=[])
         if not ticker:
             return ctx
+        refresh_state = self.market_service.ensure_fresh(ticker)
+        if refresh_state.get("refreshed"):
+            ctx.runtime_warnings.append("Data was refreshed during request.")
+        if self.market_service.is_stale(ticker):
+            ctx.runtime_warnings.append("Price data is stale.")
+        for w in refresh_state.get("warnings", []):
+            ctx.runtime_warnings.append(w)
 
         company = self.company_service.get_company(ticker)
         if company:
@@ -36,13 +43,13 @@ class EvidenceAggregator:
                     source_type="db",
                     ticker=ticker,
                     date=str(company.get("fetched_at") or "N/A")[:10],
-                    content=f"{company['company_name']} - {company['exchange']} - {company['sector']}",
+                    content=f"{company['company_name']} - {company['exchange']} - {company['sector']} (fetched_at={company.get('fetched_at')})",
                 )
             )
 
         market = self.market_service.summarize_3m(ticker)
         rows = self.market_service.get_prices(ticker, 90)
-        closes = [float(r["close"]) for r in rows]
+        closes = self.analytics_service.get_close_prices(ticker, 120)
 
         if market:
             ctx.market_snapshot = MarketSnapshot(**market)
@@ -53,7 +60,7 @@ class EvidenceAggregator:
                     source_type="db",
                     ticker=ticker,
                     date=market["date_to"],
-                    content=f"close_start={market['start_close']}, close_latest={market['latest_close']}, return={market['return_3m_pct']}%",
+                    content=f"close_start={market['start_close']}, close_latest={market['latest_close']}, return={market['return_3m_pct']}%, fetched_at={rows[-1].get('fetched_at') if rows else 'N/A'}",
                 )
             )
 

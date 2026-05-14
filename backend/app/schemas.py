@@ -93,6 +93,7 @@ class AnalyticalContext(BaseModel):
     news_snapshot: Optional[NewsSnapshot] = None
     report_snapshot: Optional[ReportSnapshot] = None
     evidence: list[EvidenceItem] = []
+    runtime_warnings: list[str] = []
 
 
 class ChatResponse(BaseModel):

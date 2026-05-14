@@ -5,6 +5,7 @@ import time
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
 from app.cache import get_cache, normalize_query, set_cache
 from app.router import route_query
@@ -45,7 +46,7 @@ def _safe_response(query: str, intent: str, route: str, answer: str, warnings: l
     )
 
 
-app = FastAPI(title="Hybrid Agentic RAG - VN Stock MVP")
+app = FastAPI(title="FinAgentic")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
@@ -58,6 +59,16 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/")
+def root():
+    return {"status": "ok", "app": "FinAgentic"}
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(status_code=204)
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -146,6 +157,7 @@ def chat(req: ChatRequest):
         answer=answer,
         evidence=ctx.evidence,
         has_numeric=router_result.intent in ["market_data", "technical_analysis", "investment_advisory"],
+        runtime_warnings=ctx.runtime_warnings,
         demo_fallback=(
             any(
                 marker in (e.source or "").lower()

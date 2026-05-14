@@ -20,8 +20,10 @@ def ensure_runtime_tables() -> None:
     CREATE TABLE IF NOT EXISTS companies (
         ticker TEXT PRIMARY KEY,
         company_name TEXT NOT NULL,
+        name TEXT,
         exchange TEXT NOT NULL,
         sector TEXT NOT NULL,
+        industry TEXT,
         description TEXT NOT NULL,
         source TEXT NOT NULL DEFAULT 'unknown',
         source_url TEXT,
@@ -90,10 +92,13 @@ def ensure_runtime_tables() -> None:
 
     CREATE TABLE IF NOT EXISTS ingestion_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source TEXT NOT NULL DEFAULT 'unknown',
+        job_type TEXT,
+        started_at TEXT,
+        finished_at TEXT,
         run_at TEXT NOT NULL,
         ingestion_type TEXT NOT NULL,
         ticker TEXT,
-        source TEXT NOT NULL,
         status TEXT NOT NULL,
         records_raw INTEGER NOT NULL,
         records_upserted INTEGER NOT NULL,
@@ -123,9 +128,11 @@ def _ensure_compatible_columns(conn) -> None:
 
     alter_map = {
         "companies": [
+            ("name", "TEXT"),
             ("source", "TEXT NOT NULL DEFAULT 'unknown'"),
             ("source_url", "TEXT"),
             ("fetched_at", "TEXT NOT NULL DEFAULT ''"),
+            ("industry", "TEXT"),
         ],
         "prices": [
             ("source", "TEXT NOT NULL DEFAULT 'unknown'"),
@@ -150,9 +157,12 @@ def _ensure_compatible_columns(conn) -> None:
             ("updated_at", "TEXT"),
         ],
         "ingestion_logs": [
+            ("source", "TEXT"),
+            ("job_type", "TEXT"),
+            ("started_at", "TEXT"),
+            ("finished_at", "TEXT"),
             ("ingestion_type", "TEXT"),
             ("ticker", "TEXT"),
-            ("source", "TEXT"),
             ("status", "TEXT"),
             ("records_raw", "INTEGER"),
             ("records_upserted", "INTEGER"),

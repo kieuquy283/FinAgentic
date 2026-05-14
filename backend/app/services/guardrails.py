@@ -14,6 +14,7 @@ def apply_guardrails(
     evidence: list[EvidenceItem],
     has_numeric: bool,
     demo_fallback: bool = False,
+    runtime_warnings: list[str] | None = None,
 ) -> GuardrailResult:
     warnings: list[str] = []
     passed = True
@@ -31,5 +32,7 @@ def apply_guardrails(
 
     if "demo" not in answer.lower() and demo_fallback:
         warnings.append("Du lieu dang o che do demo/mock.")
+    if runtime_warnings:
+        warnings.extend(runtime_warnings)
 
     return GuardrailResult(passed=passed, warnings=warnings, disclaimer=DISCLAIMER)

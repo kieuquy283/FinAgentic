@@ -1,9 +1,22 @@
 ﻿from __future__ import annotations
 
 import numpy as np
+from sqlalchemy import text
+
+from app.db import get_engine
 
 
 class AnalyticsService:
+    def get_close_prices(self, ticker: str, limit: int = 120) -> list[float]:
+        if not ticker:
+            return []
+        with get_engine().connect() as conn:
+            rows = conn.execute(
+                text("SELECT close FROM prices WHERE ticker=:ticker ORDER BY date DESC LIMIT :limit"),
+                {"ticker": ticker, "limit": limit},
+            ).mappings().all()
+        return [float(r["close"]) for r in reversed(rows)]
+
     def calculate_sma(self, prices: list[float], window: int = 20) -> float:
         if len(prices) < window:
             raise ValueError("insufficient data for SMA")

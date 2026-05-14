@@ -3,9 +3,16 @@
 from sqlalchemy import text
 
 from app.db import get_engine
+from app.ingestion.freshness import is_price_stale
+from app.ingestion.vnstock_ingestion import refresh_if_needed
 
 
 class MarketDataService:
+    def ensure_fresh(self, ticker: str) -> dict:
+        if not ticker:
+            return {"refreshed": False, "warnings": []}
+        return refresh_if_needed(ticker)
+
     def get_prices(self, ticker: str, limit: int = 90):
         if not ticker:
             return []
@@ -24,6 +31,14 @@ class MarketDataService:
                 {"ticker": ticker, "limit": limit},
             ).mappings().all()
         return list(reversed(rows))
+
+    def is_stale(self, ticker: str) -> bool:
+        if not ticker:
+            return True
+        engine = get_engine()
+        with engine.connect() as conn:
+            row = conn.execute(text("SELECT MAX(date) AS d FROM prices WHERE ticker=:ticker"), {"ticker": ticker}).mappings().first()
+        return is_price_stale(row["d"] if row else None)
 
     def summarize_3m(self, ticker: str):
         rows = self.get_prices(ticker, 90)

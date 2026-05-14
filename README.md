@@ -1,7 +1,7 @@
-﻿# Hybrid Agentic RAG MVP - Vietnamese Stock Assistant
+# FinAgentic - Vietnamese Stock Assistant
 
 ## Purpose
-This repository is a 4-day MVP demo of a Hybrid Agentic RAG architecture for Vietnamese stock analysis.
+This repository is a 4-day MVP demo of the FinAgentic architecture for Vietnamese stock analysis.
 
 ## Architecture Summary
 - DB-first structured facts from SQLite (`companies`, `prices`, `news`, `reports`).
@@ -82,6 +82,13 @@ Run from `backend/` after environment setup:
 python scripts/ingest_real_data.py --tickers FPT HPG VCB VNM
 ```
 
+MCP-style vnstock ingestion entrypoints:
+```bash
+python -m app.ingestion.vnstock_ingestion --tickers FPT HPG VCB VNM --prices
+python -m app.ingestion.vnstock_ingestion --tickers FPT --profile
+python -m app.ingestion.vnstock_ingestion --tickers FPT --all
+```
+
 Required command targets:
 ```bash
 python -m app.ingestion.market_ingestion
@@ -99,6 +106,18 @@ Notes:
 - Ingestion writes normalized data into DB tables, then services read from DB.
 - `vnstock` is primary for prices/company/finance data.
 - If real data is unavailable, guardrails show: `Real data missing; using demo fallback data.`
+
+Verify DB contains real vnstock rows:
+```bash
+cd backend
+python - <<'PY'
+from sqlalchemy import text
+from app.db import get_engine
+with get_engine().connect() as conn:
+    rows = conn.execute(text("SELECT ticker,date,source,fetched_at FROM prices WHERE source='vnstock' ORDER BY fetched_at DESC LIMIT 5")).mappings().all()
+    print(rows)
+PY
+```
 
 ## Scheduled Refresh
 - Windows Task Scheduler: run ingestion commands every 30-60 minutes for market/news and daily for company metadata.
@@ -180,5 +199,6 @@ Run in this order:
 
 ## Disclaimer
 Thong tin nay chi phuc vu muc dich tham khao va demo he thong, khong phai khuyen nghi dau tu ca nhan hoa. Nguoi dung can tu danh gia rui ro hoac tham khao chuyen gia tai chinh truoc khi ra quyet dinh.
+
 
 
