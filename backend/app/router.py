@@ -1,55 +1,39 @@
 ﻿from __future__ import annotations
 
-import re
-from typing import Optional
 from app.schemas import RouterResult
-
-TICKERS = ["FPT", "HPG", "VCB", "VNM"]
-
-
-def _extract_tickers(query: str) -> list[str]:
-    upper = query.upper()
-    return [t for t in TICKERS if t in upper]
+from app.services.planner_service import planner_route_plan
+from app.services.router_scorer import score_query
 
 
 def route_query(query: str) -> RouterResult:
-    q = query.lower()
-    tickers = _extract_tickers(query)
+    scored = score_query(query)
+    intent = scored.intent
+    route = scored.route
+    needs_planner = scored.needs_planner
+    if needs_planner:
+        plan = planner_route_plan(query, scored)
+        intent = str(plan.get("intent") or intent)
+        route = str(plan.get("route") or route)
 
-    intent = "unknown"
-    route = "unknown"
-    indicators: list[str] = []
-    window_size: Optional[int] = None
-    date_range: Optional[str] = None
-
-    if any(k in q for k in ["niem yet", "niêm yết", "san", "sàn", "exchange"]):
-        intent, route = "company_info", "direct"
-    elif any(k in q for k in ["gia", "giá", "3 thang", "3 tháng", "ohlcv", "xu huong", "xu hướng"]):
-        intent, route, date_range = "market_data", "direct", "3m"
-    elif any(k in q for k in ["rsi", "sma", "chi bao", "chỉ báo", "return"]):
-        intent, route = "technical_analysis", "analytics"
-        if "rsi" in q:
-            indicators.append("RSI")
-            window_size = 14
-        if "sma" in q:
-            indicators.append("SMA")
-            window_size = 20 if "20" in q else window_size
-    elif any(k in q for k in ["tin tuc", "tin tức", "tich cuc", "tích cực", "tieu cuc", "tiêu cực", "sentiment"]):
-        intent, route = "news_sentiment", "rag"
-    elif any(k in q for k in ["dang theo doi", "đáng theo dõi", "nen mua", "nên mua", "nam giu", "nắm giữ", "rui ro", "rủi ro"]):
-        intent, route = "investment_advisory", "advisory"
-
-    confidence = "high" if intent != "unknown" and tickers else ("medium" if intent != "unknown" else "low")
+    window_size = 14 if "RSI" in scored.indicators else (20 if "SMA" in scored.indicators else None)
+    confidence = "high" if scored.confidence >= 0.80 else ("medium" if scored.confidence >= 0.65 else "low")
 
     return RouterResult(
         intent=intent,
-        tickers=tickers,
-        date_range=date_range,
-        indicators=indicators,
+        tickers=scored.tickers,
+        date_range=scored.date_range,
+        indicators=scored.indicators,
         window_size=window_size,
-        need_news=intent in ["news_sentiment", "investment_advisory"],
-        need_reports=intent in ["news_sentiment", "investment_advisory"],
-        need_advice=intent == "investment_advisory",
+        need_news=intent in ["news_sentiment", "investment_advisory", "forecast_outlook", "report_analysis"],
+        need_reports=intent in ["news_sentiment", "investment_advisory", "report_analysis", "forecast_outlook"],
+        need_advice=intent in ["investment_advisory", "forecast_outlook"],
         confidence=confidence,
         route=route,
+        scores=scored.scores,
+        top_intent=scored.top_intent,
+        second_intent=scored.second_intent,
+        margin=scored.margin,
+        time_context=scored.time_context,
+        needs_planner=needs_planner,
+        matched_keywords=scored.matched_keywords,
     )

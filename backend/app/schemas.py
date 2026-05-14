@@ -9,10 +9,20 @@ IntentType = Literal[
     "market_data",
     "technical_analysis",
     "news_sentiment",
+    "report_analysis",
     "investment_advisory",
+    "forecast_outlook",
     "unknown",
 ]
-RouteType = Literal["direct", "analytics", "rag", "advisory", "unknown"]
+RouteType = Literal[
+    "company_direct",
+    "market_data_direct",
+    "analytics_direct",
+    "rag_light",
+    "advisory_llm",
+    "planner_fallback",
+    "unknown",
+]
 ConfidenceType = Literal["high", "medium", "low"]
 
 
@@ -31,6 +41,13 @@ class RouterResult(BaseModel):
     need_advice: bool = False
     confidence: ConfidenceType = "low"
     route: RouteType = "unknown"
+    scores: dict = {}
+    top_intent: IntentType = "unknown"
+    second_intent: IntentType = "unknown"
+    margin: float = 0.0
+    time_context: Literal["past_range", "future_horizon", "unspecified"] = "unspecified"
+    needs_planner: bool = False
+    matched_keywords: list[str] = []
 
 
 class EvidenceItem(BaseModel):
