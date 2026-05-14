@@ -3,6 +3,12 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+.venv/
+ARCHITECTURE.md
+CODEX_TASKS.md
+FRONTEND_DESIGN.md
+FRONTEND_SKILL.md
+
 # C extensions
 *.so
 
@@ -216,3 +222,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project docs and env files
+*.md
+!README.md
+*.env
+*.env.*
+!.env.example
