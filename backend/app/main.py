@@ -16,7 +16,7 @@ from sqlalchemy import text
 from app.cache import get_cache, normalize_query, set_cache
 from app.router import route_query
 from app import scheduler as scheduler_mod
-from app.db import DB_PATH, ensure_prices_index, get_db_dialect, get_engine, has_prices_index
+from app.db import DB_PATH, ensure_prices_index, ensure_runtime_tables, get_db_dialect, get_engine, has_prices_index
 from app.runtime_diagnostics import end_request_diagnostics, start_request_diagnostics
 from app.schemas import ChatRequest, ChatResponse, EvidenceItem
 from app.services.advisory_service import AdvisoryService
@@ -132,6 +132,7 @@ class RefreshRequest(BaseModel):
 
 @app.on_event("startup")
 def startup_event() -> None:
+    ensure_runtime_tables()
     ensure_prices_index()
     db_exists = DB_PATH.exists()
     db_size = DB_PATH.stat().st_size if db_exists else 0
