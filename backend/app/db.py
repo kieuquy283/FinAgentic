@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
@@ -11,123 +12,182 @@ DB_PATH = DATA_DIR / "demo_seed.db"
 _ENGINE: Engine | None = None
 
 
-def get_engine():
-    global _ENGINE
+def get_database_url() -> str:
+    db_url = os.getenv("DATABASE_URL", "").strip()
+    if db_url:
+        return db_url
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return f"sqlite:///{DB_PATH}"
+
+
+def get_engine() -> Engine:
+    global _ENGINE
     if _ENGINE is None:
-        _ENGINE = create_engine(f"sqlite:///{DB_PATH}", future=True)
+        database_url = get_database_url()
+        connect_args: dict = {}
+        if database_url.startswith("sqlite"):
+            connect_args = {"check_same_thread": False}
+        _ENGINE = create_engine(
+            database_url,
+            future=True,
+            pool_pre_ping=True,
+            connect_args=connect_args,
+        )
     return _ENGINE
+
+
+def reset_engine_for_tests() -> None:
+    global _ENGINE
+    if _ENGINE is not None:
+        _ENGINE.dispose()
+    _ENGINE = None
+
+
+def get_db_dialect() -> str:
+    return get_engine().dialect.name
 
 
 def ensure_runtime_tables() -> None:
     engine = get_engine()
-    ddl = """
-    CREATE TABLE IF NOT EXISTS companies (
-        ticker TEXT PRIMARY KEY,
-        company_name TEXT NOT NULL,
-        name TEXT,
-        exchange TEXT NOT NULL,
-        sector TEXT NOT NULL,
-        industry TEXT,
-        description TEXT NOT NULL,
-        source TEXT NOT NULL DEFAULT 'unknown',
-        source_url TEXT,
-        fetched_at TEXT NOT NULL DEFAULT ''
-    );
+    dialect = engine.dialect.name
 
-    CREATE TABLE IF NOT EXISTS prices (
-        ticker TEXT NOT NULL,
-        date TEXT NOT NULL,
-        open REAL NOT NULL,
-        high REAL NOT NULL,
-        low REAL NOT NULL,
-        close REAL NOT NULL,
-        volume INTEGER NOT NULL,
-        source TEXT NOT NULL DEFAULT 'unknown',
-        source_url TEXT,
-        fetched_at TEXT NOT NULL DEFAULT '',
-        data_date TEXT,
-        PRIMARY KEY (ticker, date)
-    );
+    ddl_common = [
+        """
+        CREATE TABLE IF NOT EXISTS companies (
+            ticker TEXT PRIMARY KEY,
+            company_name TEXT NOT NULL,
+            name TEXT,
+            exchange TEXT NOT NULL,
+            sector TEXT NOT NULL,
+            industry TEXT,
+            description TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'unknown',
+            source_url TEXT,
+            fetched_at TEXT NOT NULL DEFAULT ''
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS prices (
+            ticker TEXT NOT NULL,
+            date TEXT NOT NULL,
+            open REAL NOT NULL,
+            high REAL NOT NULL,
+            low REAL NOT NULL,
+            close REAL NOT NULL,
+            volume BIGINT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'unknown',
+            source_url TEXT,
+            fetched_at TEXT NOT NULL DEFAULT '',
+            data_date TEXT,
+            PRIMARY KEY (ticker, date)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS financial_ratios (
+            ticker TEXT NOT NULL,
+            metric TEXT NOT NULL,
+            value REAL,
+            period TEXT,
+            source TEXT NOT NULL,
+            source_url TEXT,
+            fetched_at TEXT NOT NULL,
+            data_date TEXT,
+            PRIMARY KEY (ticker, metric, period)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS news (
+            id TEXT PRIMARY KEY,
+            ticker TEXT NOT NULL,
+            date TEXT NOT NULL,
+            title TEXT,
+            snippet TEXT,
+            url TEXT,
+            published_at TEXT,
+            source TEXT NOT NULL,
+            source_url TEXT,
+            fetched_at TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS reports (
+            id TEXT PRIMARY KEY,
+            ticker TEXT NOT NULL,
+            date TEXT NOT NULL,
+            source TEXT NOT NULL,
+            content TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS raw_ingestion_items (
+            id TEXT PRIMARY KEY,
+            ingestion_type TEXT NOT NULL,
+            ticker TEXT,
+            source TEXT NOT NULL,
+            source_url TEXT,
+            fetched_at TEXT NOT NULL,
+            data_date TEXT,
+            payload TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS source_metadata (
+            source TEXT PRIMARY KEY,
+            source_type TEXT NOT NULL,
+            url TEXT,
+            limitations TEXT,
+            legal_caveats TEXT,
+            fallback_behavior TEXT,
+            updated_at TEXT NOT NULL
+        )
+        """,
+    ]
 
-    CREATE TABLE IF NOT EXISTS financial_ratios (
-        ticker TEXT NOT NULL,
-        metric TEXT NOT NULL,
-        value REAL,
-        period TEXT,
-        source TEXT NOT NULL,
-        source_url TEXT,
-        fetched_at TEXT NOT NULL,
-        data_date TEXT,
-        PRIMARY KEY (ticker, metric, period)
-    );
+    if dialect == "postgresql":
+        ingestion_logs_ddl = """
+        CREATE TABLE IF NOT EXISTS ingestion_logs (
+            id BIGSERIAL PRIMARY KEY,
+            source TEXT NOT NULL DEFAULT 'unknown',
+            job_type TEXT,
+            started_at TEXT,
+            finished_at TEXT,
+            run_at TEXT NOT NULL,
+            ingestion_type TEXT NOT NULL,
+            ticker TEXT,
+            status TEXT NOT NULL,
+            records_raw INTEGER NOT NULL,
+            records_upserted INTEGER NOT NULL,
+            message TEXT
+        )
+        """
+    else:
+        ingestion_logs_ddl = """
+        CREATE TABLE IF NOT EXISTS ingestion_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL DEFAULT 'unknown',
+            job_type TEXT,
+            started_at TEXT,
+            finished_at TEXT,
+            run_at TEXT NOT NULL,
+            ingestion_type TEXT NOT NULL,
+            ticker TEXT,
+            status TEXT NOT NULL,
+            records_raw INTEGER NOT NULL,
+            records_upserted INTEGER NOT NULL,
+            message TEXT
+        )
+        """
 
-    CREATE TABLE IF NOT EXISTS news (
-        id TEXT PRIMARY KEY,
-        ticker TEXT NOT NULL,
-        date TEXT NOT NULL,
-        title TEXT,
-        snippet TEXT,
-        url TEXT,
-        published_at TEXT,
-        source TEXT NOT NULL,
-        source_url TEXT,
-        fetched_at TEXT NOT NULL DEFAULT '',
-        content TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS reports (
-        id TEXT PRIMARY KEY,
-        ticker TEXT NOT NULL,
-        date TEXT NOT NULL,
-        source TEXT NOT NULL,
-        content TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS raw_ingestion_items (
-        id TEXT PRIMARY KEY,
-        ingestion_type TEXT NOT NULL,
-        ticker TEXT,
-        source TEXT NOT NULL,
-        source_url TEXT,
-        fetched_at TEXT NOT NULL,
-        data_date TEXT,
-        payload TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS ingestion_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        source TEXT NOT NULL DEFAULT 'unknown',
-        job_type TEXT,
-        started_at TEXT,
-        finished_at TEXT,
-        run_at TEXT NOT NULL,
-        ingestion_type TEXT NOT NULL,
-        ticker TEXT,
-        status TEXT NOT NULL,
-        records_raw INTEGER NOT NULL,
-        records_upserted INTEGER NOT NULL,
-        message TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS source_metadata (
-        source TEXT PRIMARY KEY,
-        source_type TEXT NOT NULL,
-        url TEXT,
-        limitations TEXT,
-        legal_caveats TEXT,
-        fallback_behavior TEXT,
-        updated_at TEXT NOT NULL
-    );
-    """
     with engine.begin() as conn:
-        for stmt in [s.strip() for s in ddl.split(";") if s.strip()]:
+        for stmt in ddl_common + [ingestion_logs_ddl]:
             conn.execute(text(stmt))
-        _ensure_compatible_columns(conn)
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_prices_ticker_date ON prices(ticker, date DESC)"))
+        if dialect == "sqlite":
+            _ensure_compatible_columns_sqlite(conn)
+        _create_prices_indexes(conn)
 
 
-def _ensure_compatible_columns(conn) -> None:
+def _ensure_compatible_columns_sqlite(conn) -> None:
     def has_col(table: str, col: str) -> bool:
         rows = conn.execute(text(f"PRAGMA table_info({table})")).mappings().all()
         return any(str(r.get("name")) == col for r in rows)
@@ -190,14 +250,29 @@ def _ensure_compatible_columns(conn) -> None:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {decl}"))
 
 
+def _create_prices_indexes(conn) -> None:
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_prices_ticker_date ON prices(ticker, date DESC)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_prices_ticker_date_asc ON prices(ticker, date)"))
+
+
 def ensure_prices_index() -> None:
     engine = get_engine()
     with engine.begin() as conn:
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_prices_ticker_date ON prices(ticker, date DESC)"))
+        _create_prices_indexes(conn)
 
 
 def has_prices_index() -> bool:
     engine = get_engine()
+    dialect = engine.dialect.name
     with engine.connect() as conn:
-        rows = conn.execute(text("PRAGMA index_list('prices')")).mappings().all()
-    return any(str(r.get("name")) == "idx_prices_ticker_date" for r in rows)
+        if dialect == "sqlite":
+            rows = conn.execute(text("PRAGMA index_list('prices')")).mappings().all()
+            names = {str(r.get("name")) for r in rows}
+        else:
+            rows = conn.execute(
+                text(
+                    "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() AND tablename = 'prices'"
+                )
+            ).mappings().all()
+            names = {str(r.get("indexname")) for r in rows}
+    return "idx_prices_ticker_date" in names

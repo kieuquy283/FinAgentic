@@ -154,6 +154,7 @@ cp frontend/.env.example frontend/.env
 ## Deployment
 - Render backend guide: `docs/deployment_render.md`
 - Vercel frontend guide: `docs/deployment_vercel.md`
+- PostgreSQL setup/migration guide: `docs/postgres.md`
 
 Render backend quick settings:
 - Root Directory: `backend`
@@ -163,6 +164,7 @@ Render backend quick settings:
 - Env vars:
   - `PYTHON_VERSION=3.11.9`
   - `FRONTEND_ORIGINS=https://your-vercel-app.vercel.app`
+  - `DATABASE_URL=postgresql+psycopg://<user>:<password>@<host>:5432/<dbname>`
 
 ## Demo Queries
 Run in this order:
