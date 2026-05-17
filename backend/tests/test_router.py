@@ -38,15 +38,21 @@ def test_company_info_route():
     assert r.route == "company_direct"
 
 
-def test_forecast_query_fpt_one_month_routes_to_forecast_or_advisory():
+def test_forecast_query_fpt_one_month_routes_to_forecast():
     r = route_query("dự kiến tình hình của fpt trong 1 tháng tới")
-    assert r.intent in ["forecast_outlook", "investment_advisory"]
+    assert r.intent == "forecast_outlook"
     assert r.route == "advisory_llm"
     assert r.time_context == "future_horizon"
-    assert r.date_range == "1m_forward"
+    assert r.date_range == "1M"
 
 
 def test_forecast_query_sets_need_news_and_need_advice():
     r = route_query("dự kiến tình hình của fpt trong 1 tháng tới")
     assert r.need_news is True
     assert r.need_advice is True
+
+
+def test_forecast_horizon_one_month():
+    r = route_query("triển vọng FPT trong 30 ngày tới thế nào?")
+    assert r.intent == "forecast_outlook"
+    assert r.date_range == "1M"

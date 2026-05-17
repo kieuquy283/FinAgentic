@@ -24,6 +24,8 @@ def route_query(query: str) -> RouterResult:
 
     window_size = 14 if "RSI" in scored.indicators else (20 if "SMA" in scored.indicators else None)
     confidence = "high" if scored.confidence >= 0.80 else ("medium" if scored.confidence >= 0.65 else "low")
+    qn = query.lower()
+    asks_report = any(k in qn for k in ["bao cao", "report", "phan tich"])
 
     return RouterResult(
         intent=intent,
@@ -32,7 +34,7 @@ def route_query(query: str) -> RouterResult:
         indicators=scored.indicators,
         window_size=window_size,
         need_news=intent in ["news_sentiment", "investment_advisory", "forecast_outlook", "report_analysis"],
-        need_reports=intent in ["news_sentiment", "investment_advisory", "report_analysis", "forecast_outlook"],
+        need_reports=(intent in ["news_sentiment", "report_analysis"]) or (intent in ["investment_advisory", "forecast_outlook"] and asks_report),
         need_advice=intent in ["investment_advisory", "forecast_outlook"],
         confidence=confidence,
         route=route,

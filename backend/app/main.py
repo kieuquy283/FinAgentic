@@ -31,6 +31,7 @@ from app.schemas import ChatRequest, ChatResponse, EvidenceItem
 from app.services.advisory_service import AdvisoryService
 from app.services.direct_technical_service import DirectTechnicalService
 from app.services.evidence_aggregator import EvidenceAggregator
+from app.services.forecast_outlook_service import ForecastOutlookService, parse_forecast_horizon
 from app.services.guardrails import DISCLAIMER, apply_guardrails
 
 logger = logging.getLogger(__name__)
@@ -76,13 +77,15 @@ def _log_request_summary(
     diag,
 ) -> None:
     logger.info(
-        "chat_path query=%s intent=%s route=%s tickers=%s route_ms=%.2f planner_ms=%.2f aggregator_ms=%.2f rag_ms=%.2f llm_ms=%.2f total_ms=%.2f fallback_used=%s timeout_used=%s",
+        "chat_path query=%s intent=%s route=%s tickers=%s horizon=%s route_ms=%.2f planner_ms=%.2f forecast_outlook_ms=%.2f aggregator_ms=%.2f rag_ms=%.2f llm_ms=%.2f total_ms=%.2f fallback_used=%s timeout_used=%s",
         query,
         intent,
         route,
         tickers,
+        getattr(diag, "horizon", ""),
         diag.route_ms,
         diag.planner_ms,
+        diag.forecast_outlook_ms,
         diag.aggregator_ms,
         diag.rag_ms,
         diag.llm_ms,
@@ -286,6 +289,7 @@ def chat(req: ChatRequest):
     router_result = route_query(query)
     diag.route_ms = (time.perf_counter() - t_route) * 1000
     ticker = router_result.tickers[0] if router_result.tickers else ""
+    diag.horizon = parse_forecast_horizon(query, router_result.date_range) if router_result.intent == "forecast_outlook" else ""
     if router_result.intent == "unknown":
         resp = _safe_response(
             query=query,
@@ -371,6 +375,7 @@ def chat(req: ChatRequest):
 
     aggregator = EvidenceAggregator()
     advisory = AdvisoryService()
+    forecast_service = ForecastOutlookService()
     try:
         diag.aggregator_called = True
         t_agg = time.perf_counter()
@@ -411,6 +416,15 @@ def chat(req: ChatRequest):
         answer = f"Tin tuc gan day ve {ticker} nghieng ve {ctx.news_snapshot.sentiment}."
     elif router_result.intent == "investment_advisory":
         answer = advisory.synthesize(ctx)
+    elif router_result.intent == "forecast_outlook":
+        forecast = forecast_service.synthesize(
+            ticker=ticker,
+            query=query,
+            horizon=parse_forecast_horizon(query, router_result.date_range),
+            router_result=router_result,
+            ctx=ctx,
+        )
+        answer = forecast.answer
     else:
         answer = "Chua hieu ro cau hoi. Vui long thu 1 trong 5 cau hoi demo."
         diag.fallback_used = True

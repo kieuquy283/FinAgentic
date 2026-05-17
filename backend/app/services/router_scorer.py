@@ -35,6 +35,9 @@ KEYWORDS: dict[str, list[str]] = {
         "mot thang toi",
         "xu huong toi",
         "ky vong",
+        "kha quan",
+        "tich cuc",
+        "tieu cuc",
         "outlook",
         "forecast",
         "co tang khong",
@@ -43,6 +46,9 @@ KEYWORDS: dict[str, list[str]] = {
         "3 thang toi",
         "quy toi",
         "30 ngay toi",
+        "1 tuan toi",
+        "mot tuan toi",
+        "tuan toi",
     ],
     "investment_advisory": ["co nen mua", "co dang mua", "co dang theo doi", "nam giu", "ban khong", "giai ngan", "khuyen nghi"],
     "news_sentiment": ["tin tuc", "sentiment", "tich cuc", "tieu cuc", "su kien", "anh huong"],
@@ -114,6 +120,9 @@ FUTURE_HORIZON = [
     "1 thang toi",
     "mot thang toi",
     "30 ngay toi",
+    "1 tuan toi",
+    "mot tuan toi",
+    "tuan toi",
 ]
 TICKERS = ["FPT", "HPG", "VCB", "VNM"]
 INDICATORS = ["RSI", "SMA", "MACD", "BOLLINGER", "MA20", "MA50"]
@@ -308,7 +317,25 @@ def score_query(query: str) -> RouterScoreResult:
         all_matched.extend(matched)
 
     # Strong forward-looking boost when ticker + forecast language appears.
-    forecast_hit = any(_norm(k) in qn for k in KEYWORDS["forecast_outlook"])
+    forecast_core_keywords = [
+        "du doan",
+        "du kien",
+        "du bao",
+        "trien vong",
+        "tinh hinh",
+        "sap toi",
+        "thang toi",
+        "1 thang toi",
+        "mot thang toi",
+        "30 ngay toi",
+        "1 tuan toi",
+        "mot tuan toi",
+        "tuan toi",
+        "xu huong toi",
+        "outlook",
+        "forecast",
+    ]
+    forecast_hit = any(_norm(k) in qn for k in forecast_core_keywords)
     advisory_hit = any(_norm(k) in qn for k in KEYWORDS["investment_advisory"])
     if tickers and forecast_hit:
         scores["forecast_outlook"]["final_score"] = round(max(float(scores["forecast_outlook"]["final_score"]), 0.86), 4)
@@ -348,10 +375,14 @@ def score_query(query: str) -> RouterScoreResult:
         if k.lower() in qn:
             indicators.append(k)
     date_range = None
-    if any(x in qn for x in ["3 thang", "90 ngay", "3 thang gan day", "3 thang qua"]):
-        date_range = "3m"
+    if any(x in qn for x in ["3 thang toi", "quy toi", "90 ngay toi"]):
+        date_range = "3M"
+    elif any(x in qn for x in ["1 tuan toi", "mot tuan toi", "tuan toi", "7 ngay toi"]):
+        date_range = "1W"
     elif any(x in qn for x in ["1 thang toi", "mot thang toi", "thang toi", "30 ngay toi"]):
-        date_range = "1m_forward"
+        date_range = "1M"
+    elif any(x in qn for x in ["3 thang", "90 ngay", "3 thang gan day", "3 thang qua"]):
+        date_range = "3m"
 
     logger.info(
         "router_score query=%s top_intent=%s margin=%.4f route=%s needs_planner=%s scores=%s",

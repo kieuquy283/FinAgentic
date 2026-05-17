@@ -130,3 +130,29 @@ def test_planner_timeout_returns_safe_response(monkeypatch):
     data = resp.json()
     assert data["intent"] in ["investment_advisory", "forecast_outlook"]
     assert "Disclaimer" in data["answer"] or "disclaimer" in data["answer"].lower()
+
+
+def test_forecast_answer_contains_risks_and_disclaimer():
+    resp = client.post("/chat", json={"query": "dự kiến tình hình của FPT trong 1 tháng tới"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["intent"] == "forecast_outlook"
+    assert "Rui ro" in data["answer"] or "rui ro" in data["answer"].lower()
+    assert "disclaimer" in data["guardrails"]
+
+
+def test_forecast_does_not_claim_exact_future_price():
+    resp = client.post("/chat", json={"query": "dự đoán giá FPT tháng tới"})
+    assert resp.status_code == 200
+    text = resp.json()["answer"].lower()
+    assert "gia dich den" not in text
+    assert "gia cu the" not in text
+
+
+def test_direct_sma_path_still_fast_and_unchanged():
+    resp = client.post("/chat", json={"query": "SMA20 FPT"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["intent"] == "technical_analysis"
+    assert "direct" in data["route"]
+    assert "SMA20" in data["answer"]
