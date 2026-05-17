@@ -56,3 +56,46 @@ def test_forecast_horizon_one_month():
     r = route_query("triển vọng FPT trong 30 ngày tới thế nào?")
     assert r.intent == "forecast_outlook"
     assert r.date_range == "1M"
+
+
+def test_tinh_hinh_fpt_3_thang_gan_day_routes_to_market_data():
+    r = route_query("tình hình FPT 3 tháng gần đây")
+    assert r.intent == "market_data"
+    assert r.route in ["market_data_direct", "analytics_direct"]
+    assert r.date_range == "3M"
+
+
+def test_dien_bien_gia_fpt_3_thang_qua_routes_to_market_data():
+    r = route_query("diễn biến giá FPT 3 tháng qua")
+    assert r.intent == "market_data"
+    assert r.route in ["market_data_direct", "analytics_direct"]
+    assert r.date_range == "3M"
+
+
+def test_fpt_gan_day_the_nao_not_forecast():
+    r = route_query("FPT gần đây thế nào?")
+    assert r.intent != "forecast_outlook"
+
+
+def test_du_kien_tinh_hinh_fpt_1_thang_toi_routes_to_forecast():
+    r = route_query("dự kiến tình hình FPT trong 1 tháng tới")
+    assert r.intent == "forecast_outlook"
+    assert r.route == "advisory_llm"
+    assert r.date_range == "1M"
+
+
+def test_du_doan_gia_fpt_thang_toi_routes_to_forecast():
+    r = route_query("dự đoán giá FPT tháng tới")
+    assert r.intent == "forecast_outlook"
+    assert r.route == "advisory_llm"
+    assert r.date_range == "1M"
+
+
+def test_tinh_hinh_alone_is_ambiguous_not_future_by_itself():
+    r = route_query("tình hình")
+    assert r.intent != "forecast_outlook"
+
+
+def test_past_time_expression_overrides_ambiguous_tinh_hinh_keyword():
+    r = route_query("tình hình FPT vừa qua")
+    assert r.intent == "market_data"

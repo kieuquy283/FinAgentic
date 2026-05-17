@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import os
@@ -24,31 +24,9 @@ KEYWORDS: dict[str, list[str]] = {
     "market_data": ["gia", "gia lich su", "du lieu gia", "ohlcv", "thong ke", "loi suat", "bien dong", "volume", "khoi luong", "3 thang gan day", "trong qua khu"],
     "technical_analysis": ["sma", "rsi", "macd", "bollinger", "ma20", "ma50", "trung binh dong", "chi bao ky thuat"],
     "forecast_outlook": [
-        "du kien",
-        "du bao",
-        "du doan",
-        "trien vong",
-        "tinh hinh",
-        "sap toi",
-        "thang toi",
-        "1 thang toi",
-        "mot thang toi",
-        "xu huong toi",
-        "ky vong",
-        "kha quan",
-        "tich cuc",
-        "tieu cuc",
-        "outlook",
-        "forecast",
-        "co tang khong",
-        "co giam khong",
-        "thoi gian toi",
-        "3 thang toi",
-        "quy toi",
-        "30 ngay toi",
-        "1 tuan toi",
-        "mot tuan toi",
-        "tuan toi",
+        "du kien", "du bao", "du doan", "trien vong", "tinh hinh", "sap toi", "thang toi", "1 thang toi", "mot thang toi",
+        "xu huong toi", "ky vong", "kha quan", "tich cuc", "tieu cuc", "outlook", "forecast", "co tang khong", "co giam khong",
+        "thoi gian toi", "3 thang toi", "quy toi", "30 ngay toi", "1 tuan toi", "mot tuan toi", "tuan toi",
     ],
     "investment_advisory": ["co nen mua", "co dang mua", "co dang theo doi", "nam giu", "ban khong", "giai ngan", "khuyen nghi"],
     "news_sentiment": ["tin tuc", "sentiment", "tich cuc", "tieu cuc", "su kien", "anh huong"],
@@ -108,21 +86,14 @@ PROTOTYPES: dict[str, list[str]] = {
     ],
 }
 
-PAST_RANGE = ["gan day", "vua qua", "3 thang qua", "3 thang gan day", "90 ngay gan nhat", "lich su", "trong qua khu"]
+PAST_RANGE = [
+    "gan day", "vua qua", "3 thang gan day", "3 thang qua", "thang qua", "tuan qua", "7 ngay qua", "30 ngay qua", "90 ngay qua",
+    "tu dau nam", "nam nay", "quy vua roi", "phien gan day", "lich su", "trong qua khu",
+]
 FUTURE_HORIZON = [
-    "sap toi",
-    "thoi gian toi",
-    "3 thang toi",
-    "quy toi",
-    "nam toi",
-    "tuong lai",
-    "thang toi",
-    "1 thang toi",
-    "mot thang toi",
-    "30 ngay toi",
-    "1 tuan toi",
-    "mot tuan toi",
-    "tuan toi",
+    "toi", "sap toi", "thoi gian toi", "trong thoi gian toi", "3 thang toi", "quy toi", "nam toi", "tuong lai", "thang toi",
+    "1 thang toi", "mot thang toi", "30 ngay toi", "1 tuan toi", "mot tuan toi", "tuan toi", "du kien", "du doan", "du bao",
+    "trien vong", "ky vong", "outlook", "forecast",
 ]
 TICKERS = ["FPT", "HPG", "VCB", "VNM"]
 INDICATORS = ["RSI", "SMA", "MACD", "BOLLINGER", "MA20", "MA50"]
@@ -131,7 +102,7 @@ INDICATORS = ["RSI", "SMA", "MACD", "BOLLINGER", "MA20", "MA50"]
 def _norm(text: str) -> str:
     t = unicodedata.normalize("NFD", text)
     t = "".join(ch for ch in t if unicodedata.category(ch) != "Mn")
-    t = t.replace("đ", "d").replace("Đ", "D")
+    t = t.replace("\u0111", "d").replace("\u0110", "D")
     t = t.lower()
     t = re.sub(r"[^a-z0-9\s]", " ", t)
     return re.sub(r"\s+", " ", t).strip()
@@ -196,11 +167,32 @@ def _extract_tickers(query: str) -> list[str]:
     return [t for t in TICKERS if t in up]
 
 
-def _time_context(query: str) -> str:
+def _time_direction(query: str) -> str:
     q = _norm(query)
-    if any(_norm(k) in q for k in FUTURE_HORIZON):
+    past_hit = any(_norm(k) in q for k in PAST_RANGE)
+    future_hit = any(_norm(k) in q for k in FUTURE_HORIZON)
+    if past_hit and not future_hit:
+        return "past"
+    if future_hit and not past_hit:
+        return "future"
+    if past_hit and future_hit:
+        explicit_past = any(x in q for x in ["gan day", "vua qua", "3 thang gan day", "3 thang qua", "thang qua", "tuan qua", "30 ngay qua", "90 ngay qua"])
+        explicit_future = any(x in q for x in ["thang toi", "tuan toi", "3 thang toi", "30 ngay toi", "du kien", "du doan", "du bao", "trien vong", "outlook", "forecast"])
+        if explicit_past and not explicit_future:
+            return "past"
+        if explicit_future and not explicit_past:
+            return "future"
+        return "unknown"
+    if any(x in q for x in ["hom nay", "hien tai", "luc nay"]):
+        return "current"
+    return "unknown"
+
+
+def _time_context(query: str) -> str:
+    d = _time_direction(query)
+    if d == "future":
         return "future_horizon"
-    if any(_norm(k) in q for k in PAST_RANGE):
+    if d == "past":
         return "past_range"
     return "unspecified"
 
@@ -243,6 +235,7 @@ class RouterScoreResult:
     tickers: list[str]
     indicators: list[str]
     date_range: str | None
+    time_direction: str
 
 
 @dataclass
@@ -276,7 +269,6 @@ def parse_indicator_spec(query: str, indicators: list[str] | None = None, date_r
     if "SMA" in candidates:
         return IndicatorSpec(indicator="sma", window=20)
 
-    # TODO: support macd, bollinger, volatility, drawdown in direct path
     return None
 
 
@@ -297,6 +289,7 @@ def _intent_to_route(intent: str) -> str:
 def score_query(query: str) -> RouterScoreResult:
     tickers = _extract_tickers(query)
     qn = _norm(query)
+    time_direction = _time_direction(query)
     time_ctx = _time_context(query)
     scores: dict[str, dict] = {}
     all_matched: list[str] = []
@@ -316,32 +309,22 @@ def score_query(query: str) -> RouterScoreResult:
         }
         all_matched.extend(matched)
 
-    # Strong forward-looking boost when ticker + forecast language appears.
     forecast_core_keywords = [
-        "du doan",
-        "du kien",
-        "du bao",
-        "trien vong",
-        "tinh hinh",
-        "sap toi",
-        "thang toi",
-        "1 thang toi",
-        "mot thang toi",
-        "30 ngay toi",
-        "1 tuan toi",
-        "mot tuan toi",
-        "tuan toi",
-        "xu huong toi",
-        "outlook",
-        "forecast",
+        "du doan", "du kien", "du bao", "trien vong", "sap toi", "thang toi", "1 thang toi", "mot thang toi",
+        "30 ngay toi", "1 tuan toi", "mot tuan toi", "tuan toi", "xu huong toi", "outlook", "forecast",
     ]
     forecast_hit = any(_norm(k) in qn for k in forecast_core_keywords)
     advisory_hit = any(_norm(k) in qn for k in KEYWORDS["investment_advisory"])
-    if tickers and forecast_hit:
+    if tickers and forecast_hit and time_direction == "future":
         scores["forecast_outlook"]["final_score"] = round(max(float(scores["forecast_outlook"]["final_score"]), 0.86), 4)
         scores["investment_advisory"]["final_score"] = round(max(float(scores["investment_advisory"]["final_score"]), 0.74), 4)
-    elif tickers and advisory_hit and time_ctx == "future_horizon":
+    elif tickers and advisory_hit and time_direction == "future":
         scores["investment_advisory"]["final_score"] = round(max(float(scores["investment_advisory"]["final_score"]), 0.82), 4)
+
+    market_past_signal = tickers and time_direction == "past" and any(x in qn for x in ["tinh hinh", "dien bien", "gia"])
+    if market_past_signal:
+        scores["market_data"]["final_score"] = round(max(float(scores["market_data"]["final_score"]), 0.88), 4)
+        scores["forecast_outlook"]["final_score"] = round(min(float(scores["forecast_outlook"]["final_score"]), 0.55), 4)
 
     ranked = sorted(scores.items(), key=lambda x: x[1]["final_score"], reverse=True)
     top_intent = ranked[0][0] if ranked else "unknown"
@@ -350,7 +333,6 @@ def score_query(query: str) -> RouterScoreResult:
     second_score = float(ranked[1][1]["final_score"]) if len(ranked) > 1 else 0.0
     margin = max(0.0, top_score - second_score)
 
-    # Domain gate: avoid forcing non-finance/noisy queries into finance intents.
     finance_signal = len(tickers) > 0 or len(all_matched) > 0
     if not finance_signal and top_score < 0.55:
         top_intent = "unknown"
@@ -374,14 +356,21 @@ def score_query(query: str) -> RouterScoreResult:
     for k in ["RSI", "SMA", "MACD", "BOLLINGER", "MA20", "MA50"]:
         if k.lower() in qn:
             indicators.append(k)
+
     date_range = None
-    if any(x in qn for x in ["3 thang toi", "quy toi", "90 ngay toi"]):
+    if any(x in qn for x in ["3 thang gan day", "3 thang qua"]):
+        date_range = "3M"
+    elif any(x in qn for x in ["30 ngay qua"]):
+        date_range = "30D"
+    elif any(x in qn for x in ["90 ngay qua"]):
+        date_range = "90D"
+    elif any(x in qn for x in ["3 thang toi", "quy toi", "90 ngay toi"]):
         date_range = "3M"
     elif any(x in qn for x in ["1 tuan toi", "mot tuan toi", "tuan toi", "7 ngay toi"]):
         date_range = "1W"
     elif any(x in qn for x in ["1 thang toi", "mot thang toi", "thang toi", "30 ngay toi"]):
         date_range = "1M"
-    elif any(x in qn for x in ["3 thang", "90 ngay", "3 thang gan day", "3 thang qua"]):
+    elif any(x in qn for x in ["3 thang", "90 ngay"]):
         date_range = "3m"
 
     logger.info(
@@ -408,4 +397,5 @@ def score_query(query: str) -> RouterScoreResult:
         tickers=tickers,
         indicators=indicators,
         date_range=date_range,
+        time_direction=time_direction,
     )

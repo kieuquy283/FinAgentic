@@ -24,7 +24,7 @@ def test_unknown_intent_returns_fallback():
     assert data["intent"] == "unknown"
     assert data["route"] == "unknown"
     assert data["confidence"] in ["low", "medium", "high"]
-    assert "Chua hieu ro cau hoi" in data["answer"]
+    assert "Minh chua du thong tin" in data["answer"] or "Mình chưa đủ thông tin" in data["answer"]
 
 
 def test_missing_ticker_returns_clear_error():
@@ -156,3 +156,41 @@ def test_direct_sma_path_still_fast_and_unchanged():
     assert data["intent"] == "technical_analysis"
     assert "direct" in data["route"]
     assert "SMA20" in data["answer"]
+
+
+def test_technical_answer_is_natural_and_contains_indicator_explanation():
+    resp = client.post("/chat", json={"query": "SMA20 FPT"})
+    assert resp.status_code == 200
+    text = resp.json()["answer"]
+    assert "SMA20 cua FPT" in text or "SMA20 của FPT" in text
+    assert "trung binh" in text.lower() or "trung bình" in text.lower()
+
+
+def test_market_summary_answer_does_not_predict_future():
+    resp = client.post("/chat", json={"query": "tinh hinh FPT 3 thang gan day"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["intent"] == "market_data"
+    text = data["answer"].lower()
+    assert "khong phai du bao gia tuong lai" in text
+
+
+def test_unknown_answer_is_fast_and_human_readable():
+    import time
+
+    t0 = time.perf_counter()
+    resp = client.post("/chat", json={"query": "abcxyz ???"})
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["intent"] == "unknown"
+    assert "Minh chua du thong tin" in data["answer"] or "Mình chưa đủ thông tin" in data["answer"]
+    assert elapsed_ms < 100
+
+
+def test_answer_composer_does_not_change_chatresponse_contract():
+    resp = client.post("/chat", json={"query": "SMA20 FPT"})
+    assert resp.status_code == 200
+    data = resp.json()
+    for k in ["query", "intent", "route", "answer", "evidence", "confidence", "guardrails", "latency_ms"]:
+        assert k in data

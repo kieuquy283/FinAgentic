@@ -29,6 +29,7 @@ from app.db import (
 from app.runtime_diagnostics import end_request_diagnostics, start_request_diagnostics
 from app.schemas import ChatRequest, ChatResponse, EvidenceItem
 from app.services.advisory_service import AdvisoryService
+from app.services.answer_composer import AnswerComposer
 from app.services.direct_technical_service import DirectTechnicalService
 from app.services.evidence_aggregator import EvidenceAggregator
 from app.services.forecast_outlook_service import ForecastOutlookService, parse_forecast_horizon
@@ -291,11 +292,12 @@ def chat(req: ChatRequest):
     ticker = router_result.tickers[0] if router_result.tickers else ""
     diag.horizon = parse_forecast_horizon(query, router_result.date_range) if router_result.intent == "forecast_outlook" else ""
     if router_result.intent == "unknown":
+        composer = AnswerComposer()
         resp = _safe_response(
             query=query,
             intent="unknown",
             route="unknown",
-            answer="Chua hieu ro cau hoi. Vui long thu 1 trong 5 cau hoi demo.",
+            answer=composer.compose_unknown_answer(),
             warnings=["Y nghia cau hoi chua ro.", "Du lieu dang o che do demo/mock."],
             latency_ms=int((time.perf_counter() - start) * 1000),
         )
@@ -328,6 +330,7 @@ def chat(req: ChatRequest):
         return resp
 
     direct_service = DirectTechnicalService()
+    composer = AnswerComposer()
     if direct_service.can_handle(router_result, query):
         diag.direct_technical_used = True
         t_direct = time.perf_counter()
@@ -339,10 +342,16 @@ def chat(req: ChatRequest):
         diag.analytics_ms = direct_result.analytics_ms
         diag.indicator_cache_hit = direct_result.cache_hit
 
+        latest_date = direct_result.evidence[0].date if direct_result.evidence else None
+        natural_answer = composer.compose_technical_answer(
+            ticker=ticker,
+            raw_answer=direct_result.answer,
+            latest_price_date=latest_date,
+        )
         t_guard = time.perf_counter()
         guard = apply_guardrails(
             intent=router_result.intent,
-            answer=direct_result.answer,
+            answer=natural_answer,
             evidence=direct_result.evidence,
             has_numeric=True,
             demo_fallback=False,
@@ -354,7 +363,7 @@ def chat(req: ChatRequest):
             query=req.query,
             intent=router_result.intent,
             route=router_result.route,
-            answer=f"{direct_result.answer}\n{guard.disclaimer}",
+            answer=f"{natural_answer}\n{guard.disclaimer}",
             evidence=direct_result.evidence,
             confidence=conf,
             guardrails=guard,
@@ -404,29 +413,36 @@ def chat(req: ChatRequest):
         return resp
 
     if router_result.intent == "company_info" and ctx.company_snapshot:
-        answer = f"{ctx.company_snapshot.ticker} niem yet tren san {ctx.company_snapshot.exchange}."
+        answer = composer.compose_company_info_answer(ctx.company_snapshot)
     elif router_result.intent == "market_data" and ctx.market_snapshot:
-        m = ctx.market_snapshot
-        trend = "tang" if m.return_3m_pct >= 0 else "giam"
-        answer = f"Gia {ticker} 3 thang {trend} {abs(m.return_3m_pct)}%, tu {m.start_close} den {m.latest_close}."
+        answer = composer.compose_market_summary_answer(ticker=ticker, market=ctx.market_snapshot)
     elif router_result.intent == "technical_analysis" and ctx.technical_snapshot:
         t = ctx.technical_snapshot
-        answer = f"{ticker}: RSI14={t.rsi14}, SMA20={t.sma20}, Return={t.return_pct}%."
+        answer = (
+            f"RSI14 cua {ticker} hien o muc {t.rsi14}, SMA20 khoang {t.sma20}, "
+            f"hieu suat ky gan day {t.return_pct}%. Day la bo chi bao ky thuat de tham khao xu huong ngan han."
+        )
     elif router_result.intent == "news_sentiment" and ctx.news_snapshot:
         answer = f"Tin tuc gan day ve {ticker} nghieng ve {ctx.news_snapshot.sentiment}."
     elif router_result.intent == "investment_advisory":
         answer = advisory.synthesize(ctx)
     elif router_result.intent == "forecast_outlook":
+        horizon = parse_forecast_horizon(query, router_result.date_range)
         forecast = forecast_service.synthesize(
             ticker=ticker,
             query=query,
-            horizon=parse_forecast_horizon(query, router_result.date_range),
+            horizon=horizon,
             router_result=router_result,
             ctx=ctx,
         )
-        answer = forecast.answer
+        answer = composer.compose_forecast_outlook_answer(
+            ticker=ticker,
+            horizon=horizon,
+            ctx=ctx,
+            draft=forecast.answer,
+        )
     else:
-        answer = "Chua hieu ro cau hoi. Vui long thu 1 trong 5 cau hoi demo."
+        answer = composer.compose_unknown_answer()
         diag.fallback_used = True
 
     t_guard = time.perf_counter()
