@@ -48,3 +48,37 @@ def test_db_failure_returns_safe_error(monkeypatch):
     data = resp.json()
     assert data["confidence"] == "low"
     assert "He thong du lieu chua san sang" in data["answer"]
+
+
+def test_sma20_direct_path_skips_aggregator_and_network(monkeypatch):
+    from app.services.evidence_aggregator import EvidenceAggregator
+    from app.services.rag_service import RagService
+    from app.services.advisory_service import AdvisoryService
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("should not be called for direct technical path")
+
+    monkeypatch.setattr(EvidenceAggregator, "build", _boom)
+    monkeypatch.setattr(RagService, "search", _boom)
+    monkeypatch.setattr(AdvisoryService, "synthesize", _boom)
+
+    resp = client.post("/chat", json={"query": "SMA20 FPT"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["intent"] == "technical_analysis"
+    assert "direct" in data["route"]
+    assert "SMA20" in data["answer"]
+
+
+def test_healthz_includes_database_diagnostics():
+    resp = client.get("/healthz")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "status" in data
+    assert "uptime_seconds" in data
+    assert "database" in data
+    assert "dialect" in data["database"]
+    assert "connection_ok" in data["database"]
+    assert "target" in data["database"]
+    assert "prices_table_exists" in data["database"]
+    assert "idx_prices_ticker_date" in data["database"]

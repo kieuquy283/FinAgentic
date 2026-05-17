@@ -16,7 +16,16 @@ from sqlalchemy import text
 from app.cache import get_cache, normalize_query, set_cache
 from app.router import route_query
 from app import scheduler as scheduler_mod
-from app.db import DB_PATH, ensure_prices_index, ensure_runtime_tables, get_db_dialect, get_engine, has_prices_index
+from app.db import (
+    DB_PATH,
+    ensure_prices_index,
+    ensure_runtime_tables,
+    get_database_target_public,
+    get_db_dialect,
+    get_engine,
+    has_prices_index,
+    table_exists,
+)
 from app.runtime_diagnostics import end_request_diagnostics, start_request_diagnostics
 from app.schemas import ChatRequest, ChatResponse, EvidenceItem
 from app.services.advisory_service import AdvisoryService
@@ -78,19 +87,24 @@ def health():
 def healthz():
     db_ok = True
     prices_count = None
+    prices_exists = False
     try:
         with get_engine().connect() as conn:
             conn.execute(text("SELECT 1")).scalar()
-            row = conn.execute(text("SELECT COUNT(*) AS c FROM prices")).mappings().first()
-            prices_count = int(row["c"]) if row else 0
+            prices_exists = table_exists("prices")
+            if prices_exists:
+                row = conn.execute(text("SELECT COUNT(*) AS c FROM prices")).mappings().first()
+                prices_count = int(row["c"]) if row else 0
     except Exception:
         db_ok = False
     return {
         "status": "ok" if db_ok else "degraded",
-        "uptime_s": round(time.time() - APP_START_TS, 3),
+        "uptime_seconds": round(time.time() - APP_START_TS, 3),
         "database": {
             "dialect": get_db_dialect(),
             "connection_ok": db_ok,
+            "target": get_database_target_public(),
+            "prices_table_exists": prices_exists,
             "prices_count": prices_count,
             "idx_prices_ticker_date": has_prices_index() if db_ok else False,
         },

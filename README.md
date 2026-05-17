@@ -156,6 +156,15 @@ cp frontend/.env.example frontend/.env
 - Vercel frontend guide: `docs/deployment_vercel.md`
 - PostgreSQL setup/migration guide: `docs/postgres.md`
 
+## PostgreSQL Local Quickstart
+```powershell
+docker compose -f docker-compose.postgres.yml up -d
+$env:DATABASE_URL='postgresql+psycopg://finagentic:finagentic@localhost:5432/finagentic'
+python backend\scripts\migrate_sqlite_to_postgres.py --truncate
+cd backend
+uvicorn app.main:app --reload
+```
+
 Render backend quick settings:
 - Root Directory: `backend`
 - Build Command: `pip install -r requirements.txt`

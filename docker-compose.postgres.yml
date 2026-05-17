@@ -10,7 +10,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - finagentic_postgres_data:/var/lib/postgresql/data
+      - finagentic_pg_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U finagentic -d finagentic"]
       interval: 10s
@@ -18,4 +18,4 @@ services:
       retries: 5
 
 volumes:
-  finagentic_postgres_data:
+  finagentic_pg_data:

@@ -112,3 +112,10 @@ def test_migration_script_copies_prices(tmp_path: Path):
     with dst.connect() as conn:
         row = conn.execute(text("SELECT COUNT(*) AS c FROM prices")).mappings().first()
     assert int(row["c"]) == 1
+
+
+def test_public_database_target_hides_password(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:secret@localhost:5432/finagentic")
+    db.reset_engine_for_tests()
+    target = db.get_database_target_public()
+    assert target == "localhost:5432/finagentic"

@@ -47,6 +47,34 @@ def get_db_dialect() -> str:
     return get_engine().dialect.name
 
 
+def get_database_target_public() -> str:
+    engine = get_engine()
+    url = engine.url
+    if engine.dialect.name == "sqlite":
+        db_name = str(url.database or DB_PATH)
+        return str(Path(db_name).resolve())
+    host = url.host or "localhost"
+    port = url.port or 5432
+    database = url.database or ""
+    return f"{host}:{port}/{database}"
+
+
+def table_exists(table: str) -> bool:
+    engine = get_engine()
+    with engine.connect() as conn:
+        if engine.dialect.name == "sqlite":
+            row = conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' AND name=:table"),
+                {"table": table},
+            ).mappings().first()
+            return bool(row)
+        row = conn.execute(
+            text("SELECT to_regclass(:table_name) AS tbl"),
+            {"table_name": table},
+        ).mappings().first()
+        return bool(row and row.get("tbl"))
+
+
 def ensure_runtime_tables() -> None:
     engine = get_engine()
     dialect = engine.dialect.name
