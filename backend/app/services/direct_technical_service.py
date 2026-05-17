@@ -83,7 +83,7 @@ class DirectTechnicalService:
         if not self._has_enough_data(spec, len(prices)):
             warnings.append("Insufficient price data for requested indicator.")
             result = DirectTechnicalResult(
-                answer=f"Khong du du lieu de tinh {self._label(spec)} cho {ticker}.",
+                answer=f"Không đủ dữ liệu để tính {self._label(spec)} cho {ticker}.",
                 evidence=evidence,
                 warnings=warnings,
                 cache_hit=False,

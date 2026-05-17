@@ -33,7 +33,7 @@ from app.services.answer_composer import AnswerComposer
 from app.services.direct_technical_service import DirectTechnicalService
 from app.services.evidence_aggregator import EvidenceAggregator
 from app.services.forecast_outlook_service import ForecastOutlookService, parse_forecast_horizon
-from app.services.guardrails import DISCLAIMER, apply_guardrails
+from app.services.guardrails import apply_guardrails
 
 logger = logging.getLogger(__name__)
 APP_START_TS = time.time()
@@ -58,16 +58,24 @@ def _safe_response(query: str, intent: str, route: str, answer: str, warnings: l
         query=query,
         intent=intent,
         route=route,
-        answer=f"{answer}\n{DISCLAIMER}",
+        answer=answer,
         evidence=[],
         confidence="low",
         guardrails={
             "passed": False,
             "warnings": warnings,
-            "disclaimer": DISCLAIMER,
+            "disclaimer": "",
         },
         latency_ms=latency_ms,
     )
+
+
+def _attach_disclaimer_once(answer: str, disclaimer: str) -> str:
+    if not disclaimer:
+        return answer
+    if disclaimer in answer:
+        return answer
+    return f"{answer}\n{disclaimer}"
 
 
 def _log_request_summary(
@@ -231,8 +239,8 @@ def chat(req: ChatRequest):
             query=req.query,
             intent="unknown",
             route="unknown",
-            answer="Vui long nhap cau hoi co ticker, vi du: FPT niem yet o san nao?",
-            warnings=["Cau hoi rong.", "Du lieu dang o che do demo/mock."],
+            answer="Vui lòng nhập câu hỏi có ticker, ví dụ: FPT niêm yết ở sàn nào?",
+            warnings=["Câu hỏi rỗng.", "Dữ liệu đang ở chế độ demo/mock."],
             latency_ms=int((time.perf_counter() - start) * 1000),
         )
         diag.total_ms = (time.perf_counter() - start) * 1000
@@ -298,7 +306,7 @@ def chat(req: ChatRequest):
             intent="unknown",
             route="unknown",
             answer=composer.compose_unknown_answer(),
-            warnings=["Y nghia cau hoi chua ro.", "Du lieu dang o che do demo/mock."],
+            warnings=["Ý nghĩa câu hỏi chưa rõ.", "Dữ liệu đang ở chế độ demo/mock."],
             latency_ms=int((time.perf_counter() - start) * 1000),
         )
         diag.fallback_used = True
@@ -312,8 +320,8 @@ def chat(req: ChatRequest):
             query=query,
             intent=router_result.intent,
             route=router_result.route,
-            answer="Khong tim thay ticker hop le. Vui long dung ma co phieu nhu FPT, HPG, VCB, VNM.",
-            warnings=["Thieu ticker trong cau hoi.", "Du lieu dang o che do demo/mock."],
+            answer="Không tìm thấy ticker hợp lệ. Vui lòng dùng mã cổ phiếu như FPT, HPG, VCB, VNM.",
+            warnings=["Thiếu ticker trong câu hỏi.", "Dữ liệu đang ở chế độ demo/mock."],
             latency_ms=int((time.perf_counter() - start) * 1000),
         )
         diag.total_ms = (time.perf_counter() - start) * 1000
@@ -351,9 +359,11 @@ def chat(req: ChatRequest):
         t_guard = time.perf_counter()
         guard = apply_guardrails(
             intent=router_result.intent,
+            route=router_result.route,
             answer=natural_answer,
             evidence=direct_result.evidence,
             has_numeric=True,
+            answer_type="factual",
             demo_fallback=False,
             runtime_warnings=direct_result.warnings,
         )
@@ -363,7 +373,7 @@ def chat(req: ChatRequest):
             query=req.query,
             intent=router_result.intent,
             route=router_result.route,
-            answer=f"{natural_answer}\n{guard.disclaimer}",
+            answer=_attach_disclaimer_once(natural_answer, guard.disclaimer),
             evidence=direct_result.evidence,
             confidence=conf,
             guardrails=guard,
@@ -395,8 +405,8 @@ def chat(req: ChatRequest):
             query=query,
             intent=router_result.intent,
             route=router_result.route,
-            answer="He thong du lieu chua san sang. Vui long chay lai script seed du lieu backend.",
-            warnings=["Khong the truy cap CSDL du lieu demo.", "Du lieu dang o che do demo/mock."],
+            answer="Hệ thống dữ liệu chưa sẵn sàng. Vui lòng chạy lại script seed dữ liệu backend.",
+            warnings=["Không thể truy cập CSDL dữ liệu demo.", "Dữ liệu đang ở chế độ demo/mock."],
             latency_ms=int((time.perf_counter() - start) * 1000),
         )
         diag.total_ms = (time.perf_counter() - start) * 1000
@@ -419,11 +429,11 @@ def chat(req: ChatRequest):
     elif router_result.intent == "technical_analysis" and ctx.technical_snapshot:
         t = ctx.technical_snapshot
         answer = (
-            f"RSI14 cua {ticker} hien o muc {t.rsi14}, SMA20 khoang {t.sma20}, "
-            f"hieu suat ky gan day {t.return_pct}%. Day la bo chi bao ky thuat de tham khao xu huong ngan han."
+            f"RSI14 của {ticker} hiện ở mức {t.rsi14}, SMA20 khoảng {t.sma20}, "
+            f"hiệu suất kỳ gần đây {t.return_pct}%. Đây là bộ chỉ báo kỹ thuật để tham khảo xu hướng ngắn hạn."
         )
     elif router_result.intent == "news_sentiment" and ctx.news_snapshot:
-        answer = f"Tin tuc gan day ve {ticker} nghieng ve {ctx.news_snapshot.sentiment}."
+        answer = f"Tin tức gần đây về {ticker} nghiêng về {ctx.news_snapshot.sentiment}."
     elif router_result.intent == "investment_advisory":
         answer = advisory.synthesize(ctx)
     elif router_result.intent == "forecast_outlook":
@@ -448,9 +458,11 @@ def chat(req: ChatRequest):
     t_guard = time.perf_counter()
     guard = apply_guardrails(
         intent=router_result.intent,
+        route=router_result.route,
         answer=answer,
         evidence=ctx.evidence,
         has_numeric=router_result.intent in ["market_data", "technical_analysis", "investment_advisory"],
+        answer_type=("unknown" if router_result.intent == "unknown" else None),
         runtime_warnings=ctx.runtime_warnings,
         demo_fallback=(
             any(
@@ -471,7 +483,7 @@ def chat(req: ChatRequest):
         query=req.query,
         intent=router_result.intent,
         route=router_result.route,
-        answer=f"{answer}\n{guard.disclaimer}",
+        answer=_attach_disclaimer_once(answer, guard.disclaimer),
         evidence=ctx.evidence,
         confidence=conf,
         guardrails=guard,

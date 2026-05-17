@@ -49,9 +49,9 @@ class QwenClient:
 
     def _mock_fallback(self) -> str:
         return (
-            "Status: theo doi.\n"
-            "Evidence summary: du lieu tong hop tu AnalyticalContext.\n"
-            "Risks: bien dong ngan han, thay doi tin tuc, rui ro nganh.\n"
+            "Status: theo dõi.\n"
+            "Evidence summary: dữ liệu tổng hợp từ AnalyticalContext.\n"
+            "Risks: biến động ngắn hạn, thay đổi tin tức, rủi ro ngành.\n"
             "Confidence: low.\n"
-            "Disclaimer: Thong tin chi de tham khao, khong phai khuyen nghi dau tu ca nhan."
+            "Disclaimer: Thông tin chỉ để tham khảo, không phải khuyến nghị đầu tư cá nhân."
         )

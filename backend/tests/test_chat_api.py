@@ -13,7 +13,7 @@ def test_empty_query_returns_safe_response():
     assert data["intent"] == "unknown"
     assert data["route"] == "unknown"
     assert data["confidence"] == "low"
-    assert "Vui long nhap cau hoi" in data["answer"]
+    assert "Vui lòng nhập câu hỏi" in data["answer"]
     assert "disclaimer" in data["guardrails"]
 
 
@@ -24,7 +24,7 @@ def test_unknown_intent_returns_fallback():
     assert data["intent"] == "unknown"
     assert data["route"] == "unknown"
     assert data["confidence"] in ["low", "medium", "high"]
-    assert "Minh chua du thong tin" in data["answer"] or "Mình chưa đủ thông tin" in data["answer"]
+    assert "Mình chưa đủ thông tin" in data["answer"]
 
 
 def test_missing_ticker_returns_clear_error():
@@ -33,7 +33,7 @@ def test_missing_ticker_returns_clear_error():
     data = resp.json()
     assert data["intent"] == "market_data"
     assert data["confidence"] == "low"
-    assert "Khong tim thay ticker hop le" in data["answer"]
+    assert "Không tìm thấy ticker hợp lệ" in data["answer"]
 
 
 def test_db_failure_returns_safe_error(monkeypatch):
@@ -47,7 +47,7 @@ def test_db_failure_returns_safe_error(monkeypatch):
     assert resp.status_code == 200
     data = resp.json()
     assert data["confidence"] == "low"
-    assert "He thong du lieu chua san sang" in data["answer"]
+    assert "Hệ thống dữ liệu chưa sẵn sàng" in data["answer"]
 
 
 def test_sma20_direct_path_skips_aggregator_and_network(monkeypatch):
@@ -137,8 +137,8 @@ def test_forecast_answer_contains_risks_and_disclaimer():
     assert resp.status_code == 200
     data = resp.json()
     assert data["intent"] == "forecast_outlook"
-    assert "Rui ro" in data["answer"] or "rui ro" in data["answer"].lower()
-    assert "disclaimer" in data["guardrails"]
+    assert "Rủi ro" in data["answer"] or "rủi ro" in data["answer"].lower()
+    assert data["guardrails"]["disclaimer"] == "Thông tin này chỉ mang mục đích tham khảo, nên kiểm tra, rà soát lại. Không nên tin tưởng tuyệt đối."
 
 
 def test_forecast_does_not_claim_exact_future_price():
@@ -162,8 +162,8 @@ def test_technical_answer_is_natural_and_contains_indicator_explanation():
     resp = client.post("/chat", json={"query": "SMA20 FPT"})
     assert resp.status_code == 200
     text = resp.json()["answer"]
-    assert "SMA20 cua FPT" in text or "SMA20 của FPT" in text
-    assert "trung binh" in text.lower() or "trung bình" in text.lower()
+    assert "SMA20 của FPT" in text
+    assert "trung bình" in text.lower()
 
 
 def test_market_summary_answer_does_not_predict_future():
@@ -172,7 +172,7 @@ def test_market_summary_answer_does_not_predict_future():
     data = resp.json()
     assert data["intent"] == "market_data"
     text = data["answer"].lower()
-    assert "khong phai du bao gia tuong lai" in text
+    assert "không phải dự báo giá tương lai" in text
 
 
 def test_unknown_answer_is_fast_and_human_readable():
@@ -184,7 +184,7 @@ def test_unknown_answer_is_fast_and_human_readable():
     assert resp.status_code == 200
     data = resp.json()
     assert data["intent"] == "unknown"
-    assert "Minh chua du thong tin" in data["answer"] or "Mình chưa đủ thông tin" in data["answer"]
+    assert "Mình chưa đủ thông tin" in data["answer"]
     assert elapsed_ms < 100
 
 
@@ -194,3 +194,97 @@ def test_answer_composer_does_not_change_chatresponse_contract():
     data = resp.json()
     for k in ["query", "intent", "route", "answer", "evidence", "confidence", "guardrails", "latency_ms"]:
         assert k in data
+
+
+def test_disclaimer_has_vietnamese_diacritics():
+    resp = client.post("/chat", json={"query": "SMA20 FPT"})
+    assert resp.status_code == 200
+    disclaimer = resp.json()["guardrails"]["disclaimer"]
+    assert disclaimer == ""
+
+
+def test_unknown_fallback_has_vietnamese_diacritics():
+    resp = client.post("/chat", json={"query": "xin chao abcxyz"})
+    assert resp.status_code == 200
+    answer = resp.json()["answer"]
+    assert "Mình chưa đủ thông tin để hiểu chính xác ý bạn" in answer
+    assert resp.json()["guardrails"]["disclaimer"] == ""
+
+
+def test_direct_sma_answer_has_vietnamese_diacritics():
+    resp = client.post("/chat", json={"query": "SMA20 FPT"})
+    assert resp.status_code == 200
+    answer = resp.json()["answer"]
+    assert "của FPT" in answer
+    assert "Đây là mức giá trung bình" in answer
+
+
+def test_normalize_query_does_not_modify_final_answer():
+    from app.cache import normalize_query
+
+    q = "SMA20 FPT"
+    _ = normalize_query(q)
+    resp = client.post("/chat", json={"query": q})
+    assert resp.status_code == 200
+    assert "SMA20 của FPT" in resp.json()["answer"]
+
+
+def test_chatresponse_unicode_output():
+    resp = client.post("/chat", json={"query": "tình hình FPT 3 tháng gần đây"})
+    assert resp.status_code == 200
+    text = resp.text
+    assert "tình hình" in text.lower() or "Trong 3 tháng gần đây" in resp.json()["answer"]
+
+
+def test_direct_sma_has_no_long_disclaimer():
+    resp = client.post("/chat", json={"query": "SMA20 FPT"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["guardrails"]["disclaimer"] == ""
+    assert "khuyến nghị đầu tư cá nhân hóa" not in data["answer"]
+
+
+def test_company_info_has_no_long_disclaimer():
+    resp = client.post("/chat", json={"query": "FPT niêm yết sàn nào?"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["intent"] == "company_info"
+    assert data["guardrails"]["disclaimer"] == ""
+
+
+def test_market_data_historical_has_no_long_disclaimer():
+    resp = client.post("/chat", json={"query": "tình hình FPT 3 tháng gần đây"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["intent"] == "market_data"
+    assert data["guardrails"]["disclaimer"] == ""
+
+
+def test_forecast_outlook_has_forecast_disclaimer():
+    resp = client.post("/chat", json={"query": "dự kiến tình hình FPT trong 1 tháng tới"})
+    assert resp.status_code == 200
+    d = resp.json()["guardrails"]["disclaimer"]
+    assert d == "Thông tin này chỉ mang mục đích tham khảo, nên kiểm tra, rà soát lại. Không nên tin tưởng tuyệt đối."
+
+
+def test_investment_advisory_has_advisory_disclaimer():
+    resp = client.post("/chat", json={"query": "có nên mua FPT không?"})
+    assert resp.status_code == 200
+    d = resp.json()["guardrails"]["disclaimer"]
+    assert d.startswith("Đây không phải khuyến nghị đầu tư cá nhân hóa.")
+
+
+def test_unknown_fallback_has_no_disclaimer():
+    resp = client.post("/chat", json={"query": "???"})
+    assert resp.status_code == 200
+    assert resp.json()["intent"] == "unknown"
+    assert resp.json()["guardrails"]["disclaimer"] == ""
+
+
+def test_disclaimer_not_duplicated():
+    resp = client.post("/chat", json={"query": "dự đoán giá FPT tháng tới"})
+    assert resp.status_code == 200
+    data = resp.json()
+    d = data["guardrails"]["disclaimer"]
+    assert d
+    assert data["answer"].count(d) == 1

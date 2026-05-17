@@ -25,51 +25,51 @@ class ForecastOutlookService:
 
         quant = []
         if m is not None:
-            quant.append(f"return 3 thang gan nhat {m.return_3m_pct}% (tu {m.start_close} den {m.latest_close})")
-            quant.append(f"thanh khoan TB20 ngay {m.avg_volume_20d}")
+            quant.append(f"return 3 tháng gần nhất {m.return_3m_pct}% (từ {m.start_close} đến {m.latest_close})")
+            quant.append(f"thanh khoản TB20 ngày {m.avg_volume_20d}")
         if t is not None:
-            quant.append(f"SMA20={t.sma20}, RSI14={t.rsi14}, return ky gan day={t.return_pct}%")
+            quant.append(f"SMA20={t.sma20}, RSI14={t.rsi14}, return kỳ gần đây={t.return_pct}%")
         if not quant:
-            quant.append("chua co du du lieu dinh luong trong DB")
+            quant.append("chưa có đủ dữ liệu định lượng trong DB")
 
         qualitative = []
         if n is not None:
-            qualitative.append(f"sentiment tin tuc: {n.sentiment}")
+            qualitative.append(f"sentiment tin tức: {n.sentiment}")
         else:
-            qualitative.append("thieu bang chung tin tuc gan day")
+            qualitative.append("thiếu bằng chứng tin tức gần đây")
         if r is not None:
-            qualitative.append("co bang chung tu report")
+            qualitative.append("có bằng chứng từ report")
         else:
-            qualitative.append("chua co report gan day")
+            qualitative.append("chưa có report gần đây")
 
         risks = []
         if t is not None and t.rsi14 >= 70:
-            risks.append("RSI cao, rui ro dieu chinh ngan han")
+            risks.append("RSI cao, rủi ro điều chỉnh ngắn hạn")
         if t is not None and t.rsi14 <= 35:
-            risks.append("dong luc yeu, rui ro tiep tuc giam")
+            risks.append("động lực yếu, rủi ro tiếp tục giảm")
         if n is not None and n.sentiment == "negative":
-            risks.append("dong tin tieu cuc co the gay ap luc gia")
+            risks.append("dòng tin tiêu cực có thể gây áp lực giá")
         if not risks:
-            risks.append("bien dong thi truong chung va tin tuc bat ngo")
+            risks.append("biến động thị trường chung và tin tức bất ngờ")
 
         watch = [
-            "duy tri gia tren SMA20",
-            "bien dong RSI ve vung can bang 45-65",
-            "chat luong tin tuc/ket qua kinh doanh cap nhat",
-            "thanh khoan co duy tri tren muc trung binh hay khong",
+            "duy trì giá trên SMA20",
+            "biến động RSI về vùng cân bằng 45-65",
+            "chất lượng tin tức/kết quả kinh doanh cập nhật",
+            "thanh khoản có duy trì trên mức trung bình hay không",
         ]
 
         h = horizon or "1M"
         answer = (
-            f"Trong khung {h} toi, {ticker} hien o trang thai {stance} dua tren du lieu hien co.\n"
-            "Base scenario: dao dong theo xu huong hien tai, khong dua ra muc gia muc tieu cu the.\n"
-            f"Positive scenario: dong luc ky thuat va dong tin duy tri tich cuc.\n"
-            f"Negative scenario: ap luc dieu chinh neu xuat hien tin xau hoac suy yeu dong luc.\n"
-            f"Ly do dinh luong: {'; '.join(quant)}.\n"
-            f"Ly do dinh tinh: {'; '.join(qualitative)}.\n"
-            f"Rui ro chinh: {'; '.join(risks)}.\n"
-            f"Dau hieu can theo doi: {'; '.join(watch)}.\n"
-            "Luu y: Day la danh gia kich ban dua tren du lieu lich su/gan day, khong phai du doan gia chinh xac."
+            f"Trong khung {h} tới, {ticker} hiện ở trạng thái {stance} dựa trên dữ liệu hiện có.\n"
+            "Base scenario: dao động theo xu hướng hiện tại, không đưa ra mức giá mục tiêu cụ thể.\n"
+            "Positive scenario: động lực kỹ thuật và dòng tin duy trì tích cực.\n"
+            "Negative scenario: áp lực điều chỉnh nếu xuất hiện tin xấu hoặc suy yếu động lực.\n"
+            f"Lý do định lượng: {'; '.join(quant)}.\n"
+            f"Lý do định tính: {'; '.join(qualitative)}.\n"
+            f"Rủi ro chính: {'; '.join(risks)}.\n"
+            f"Dấu hiệu cần theo dõi: {'; '.join(watch)}.\n"
+            "Lưu ý: Đây là đánh giá kịch bản dựa trên dữ liệu lịch sử/gần đây, không phải dự đoán giá chính xác."
         )
 
         conf = "medium" if m or t else "low"
