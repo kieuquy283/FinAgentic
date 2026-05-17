@@ -281,7 +281,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar panel">
-        <h1 className="brand">Finance Agentic RAG</h1>
+        <h1 className="brand">FinAgentic</h1>
         <button type="button" className="new-chat-btn" onClick={createNewChat}>+ Đoạn chat mới</button>
 
         <h2 className="section-title">Lịch sử chat</h2>

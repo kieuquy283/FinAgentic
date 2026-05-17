@@ -68,6 +68,30 @@ def _safe_response(query: str, intent: str, route: str, answer: str, warnings: l
     )
 
 
+def _log_request_summary(
+    query: str,
+    intent: str,
+    route: str,
+    tickers: list[str],
+    diag,
+) -> None:
+    logger.info(
+        "chat_path query=%s intent=%s route=%s tickers=%s route_ms=%.2f planner_ms=%.2f aggregator_ms=%.2f rag_ms=%.2f llm_ms=%.2f total_ms=%.2f fallback_used=%s timeout_used=%s",
+        query,
+        intent,
+        route,
+        tickers,
+        diag.route_ms,
+        diag.planner_ms,
+        diag.aggregator_ms,
+        diag.rag_ms,
+        diag.llm_ms,
+        diag.total_ms,
+        diag.fallback_used,
+        diag.timeout_used,
+    )
+
+
 app = FastAPI(title="FinAgentic")
 app.add_middleware(
     CORSMiddleware,
@@ -208,6 +232,8 @@ def chat(req: ChatRequest):
             latency_ms=int((time.perf_counter() - start) * 1000),
         )
         diag.total_ms = (time.perf_counter() - start) * 1000
+        diag.fallback_used = True
+        _log_request_summary(query=query, intent="unknown", route="unknown", tickers=[], diag=diag)
         logger.info(
             "chat_diag total_ms=%.2f route_ms=%.2f response_cache_ms=%.2f direct_technical_ms=%.2f indicator_cache_ms=%.2f db_latest_date_ms=%.2f db_prices_ms=%.2f analytics_ms=%.2f guardrails_ms=%.2f aggregator_ms=%.2f direct_technical_used=%s aggregator_called=%s rag_called=%s ensure_fresh_called=%s refresh_if_needed_called=%s external_api_called=%s response_cache_hit=%s indicator_cache_hit=%s",
             diag.total_ms, diag.route_ms, diag.response_cache_ms, diag.direct_technical_ms, diag.indicator_cache_ms,
@@ -245,6 +271,7 @@ def chat(req: ChatRequest):
             latency_ms=int((time.perf_counter() - start) * 1000),
         )
         diag.total_ms = (time.perf_counter() - start) * 1000
+        _log_request_summary(query=query, intent=cached.intent, route=cached.route, tickers=[ev[0].ticker] if ev else [], diag=diag)
         logger.info(
             "chat_diag total_ms=%.2f route_ms=%.2f response_cache_ms=%.2f direct_technical_ms=%.2f indicator_cache_ms=%.2f db_latest_date_ms=%.2f db_prices_ms=%.2f analytics_ms=%.2f guardrails_ms=%.2f aggregator_ms=%.2f direct_technical_used=%s aggregator_called=%s rag_called=%s ensure_fresh_called=%s refresh_if_needed_called=%s external_api_called=%s response_cache_hit=%s indicator_cache_hit=%s",
             diag.total_ms, diag.route_ms, diag.response_cache_ms, diag.direct_technical_ms, diag.indicator_cache_ms,
@@ -259,6 +286,20 @@ def chat(req: ChatRequest):
     router_result = route_query(query)
     diag.route_ms = (time.perf_counter() - t_route) * 1000
     ticker = router_result.tickers[0] if router_result.tickers else ""
+    if router_result.intent == "unknown":
+        resp = _safe_response(
+            query=query,
+            intent="unknown",
+            route="unknown",
+            answer="Chua hieu ro cau hoi. Vui long thu 1 trong 5 cau hoi demo.",
+            warnings=["Y nghia cau hoi chua ro.", "Du lieu dang o che do demo/mock."],
+            latency_ms=int((time.perf_counter() - start) * 1000),
+        )
+        diag.fallback_used = True
+        diag.total_ms = (time.perf_counter() - start) * 1000
+        _log_request_summary(query=query, intent="unknown", route="unknown", tickers=router_result.tickers, diag=diag)
+        end_request_diagnostics()
+        return resp
 
     if router_result.intent != "unknown" and not ticker:
         resp = _safe_response(
@@ -270,6 +311,8 @@ def chat(req: ChatRequest):
             latency_ms=int((time.perf_counter() - start) * 1000),
         )
         diag.total_ms = (time.perf_counter() - start) * 1000
+        diag.fallback_used = True
+        _log_request_summary(query=query, intent=router_result.intent, route=router_result.route, tickers=router_result.tickers, diag=diag)
         logger.info(
             "chat_diag total_ms=%.2f route_ms=%.2f response_cache_ms=%.2f direct_technical_ms=%.2f indicator_cache_ms=%.2f db_latest_date_ms=%.2f db_prices_ms=%.2f analytics_ms=%.2f guardrails_ms=%.2f aggregator_ms=%.2f direct_technical_used=%s aggregator_called=%s rag_called=%s ensure_fresh_called=%s refresh_if_needed_called=%s external_api_called=%s response_cache_hit=%s indicator_cache_hit=%s",
             diag.total_ms, diag.route_ms, diag.response_cache_ms, diag.direct_technical_ms, diag.indicator_cache_ms,
@@ -315,6 +358,7 @@ def chat(req: ChatRequest):
         )
         set_cache(key, response)
         diag.total_ms = (time.perf_counter() - start) * 1000
+        _log_request_summary(query=query, intent=router_result.intent, route=router_result.route, tickers=router_result.tickers, diag=diag)
         logger.info(
             "chat_diag total_ms=%.2f route_ms=%.2f response_cache_ms=%.2f direct_technical_ms=%.2f indicator_cache_ms=%.2f db_latest_date_ms=%.2f db_prices_ms=%.2f analytics_ms=%.2f guardrails_ms=%.2f aggregator_ms=%.2f direct_technical_used=%s aggregator_called=%s rag_called=%s ensure_fresh_called=%s refresh_if_needed_called=%s external_api_called=%s response_cache_hit=%s indicator_cache_hit=%s",
             diag.total_ms, diag.route_ms, diag.response_cache_ms, diag.direct_technical_ms, diag.indicator_cache_ms,
@@ -342,6 +386,8 @@ def chat(req: ChatRequest):
             latency_ms=int((time.perf_counter() - start) * 1000),
         )
         diag.total_ms = (time.perf_counter() - start) * 1000
+        diag.fallback_used = True
+        _log_request_summary(query=query, intent=router_result.intent, route=router_result.route, tickers=router_result.tickers, diag=diag)
         logger.info(
             "chat_diag total_ms=%.2f route_ms=%.2f response_cache_ms=%.2f direct_technical_ms=%.2f indicator_cache_ms=%.2f db_latest_date_ms=%.2f db_prices_ms=%.2f analytics_ms=%.2f guardrails_ms=%.2f aggregator_ms=%.2f direct_technical_used=%s aggregator_called=%s rag_called=%s ensure_fresh_called=%s refresh_if_needed_called=%s external_api_called=%s response_cache_hit=%s indicator_cache_hit=%s",
             diag.total_ms, diag.route_ms, diag.response_cache_ms, diag.direct_technical_ms, diag.indicator_cache_ms,
@@ -367,6 +413,7 @@ def chat(req: ChatRequest):
         answer = advisory.synthesize(ctx)
     else:
         answer = "Chua hieu ro cau hoi. Vui long thu 1 trong 5 cau hoi demo."
+        diag.fallback_used = True
 
     t_guard = time.perf_counter()
     guard = apply_guardrails(
@@ -403,6 +450,7 @@ def chat(req: ChatRequest):
 
     set_cache(key, response)
     diag.total_ms = (time.perf_counter() - start) * 1000
+    _log_request_summary(query=query, intent=router_result.intent, route=router_result.route, tickers=router_result.tickers, diag=diag)
     logger.info(
         "chat_diag total_ms=%.2f route_ms=%.2f response_cache_ms=%.2f direct_technical_ms=%.2f indicator_cache_ms=%.2f db_latest_date_ms=%.2f db_prices_ms=%.2f analytics_ms=%.2f guardrails_ms=%.2f aggregator_ms=%.2f direct_technical_used=%s aggregator_called=%s rag_called=%s ensure_fresh_called=%s refresh_if_needed_called=%s external_api_called=%s response_cache_hit=%s indicator_cache_hit=%s",
         diag.total_ms, diag.route_ms, diag.response_cache_ms, diag.direct_technical_ms, diag.indicator_cache_ms,

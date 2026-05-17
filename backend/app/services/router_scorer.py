@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -22,7 +23,27 @@ INTENTS = [
 KEYWORDS: dict[str, list[str]] = {
     "market_data": ["gia", "gia lich su", "du lieu gia", "ohlcv", "thong ke", "loi suat", "bien dong", "volume", "khoi luong", "3 thang gan day", "trong qua khu"],
     "technical_analysis": ["sma", "rsi", "macd", "bollinger", "ma20", "ma50", "trung binh dong", "chi bao ky thuat"],
-    "forecast_outlook": ["du doan", "co tang khong", "co giam khong", "sap toi", "thoi gian toi", "3 thang toi", "quy toi", "trien vong", "outlook", "forecast"],
+    "forecast_outlook": [
+        "du kien",
+        "du bao",
+        "du doan",
+        "trien vong",
+        "tinh hinh",
+        "sap toi",
+        "thang toi",
+        "1 thang toi",
+        "mot thang toi",
+        "xu huong toi",
+        "ky vong",
+        "outlook",
+        "forecast",
+        "co tang khong",
+        "co giam khong",
+        "thoi gian toi",
+        "3 thang toi",
+        "quy toi",
+        "30 ngay toi",
+    ],
     "investment_advisory": ["co nen mua", "co dang mua", "co dang theo doi", "nam giu", "ban khong", "giai ngan", "khuyen nghi"],
     "news_sentiment": ["tin tuc", "sentiment", "tich cuc", "tieu cuc", "su kien", "anh huong"],
     "company_info": ["niem yet", "san nao", "nganh gi", "cong ty nao", "ho so doanh nghiep"],
@@ -82,13 +103,26 @@ PROTOTYPES: dict[str, list[str]] = {
 }
 
 PAST_RANGE = ["gan day", "vua qua", "3 thang qua", "3 thang gan day", "90 ngay gan nhat", "lich su", "trong qua khu"]
-FUTURE_HORIZON = ["sap toi", "thoi gian toi", "3 thang toi", "quy toi", "nam toi", "tuong lai"]
+FUTURE_HORIZON = [
+    "sap toi",
+    "thoi gian toi",
+    "3 thang toi",
+    "quy toi",
+    "nam toi",
+    "tuong lai",
+    "thang toi",
+    "1 thang toi",
+    "mot thang toi",
+    "30 ngay toi",
+]
 TICKERS = ["FPT", "HPG", "VCB", "VNM"]
 INDICATORS = ["RSI", "SMA", "MACD", "BOLLINGER", "MA20", "MA50"]
 
 
 def _norm(text: str) -> str:
-    t = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    t = unicodedata.normalize("NFD", text)
+    t = "".join(ch for ch in t if unicodedata.category(ch) != "Mn")
+    t = t.replace("đ", "d").replace("Đ", "D")
     t = t.lower()
     t = re.sub(r"[^a-z0-9\s]", " ", t)
     return re.sub(r"\s+", " ", t).strip()
@@ -108,6 +142,8 @@ def _cosine_token_overlap(q: str, proto: str) -> float:
 
 
 def _try_sentence_transformer_score(query: str, intent: str) -> float | None:
+    if os.getenv("ENABLE_ST_ROUTER", "false").strip().lower() not in {"1", "true", "yes", "on"}:
+        return None
     try:
         from sentence_transformers import SentenceTransformer  # type: ignore
         import numpy as np  # type: ignore
@@ -271,6 +307,15 @@ def score_query(query: str) -> RouterScoreResult:
         }
         all_matched.extend(matched)
 
+    # Strong forward-looking boost when ticker + forecast language appears.
+    forecast_hit = any(_norm(k) in qn for k in KEYWORDS["forecast_outlook"])
+    advisory_hit = any(_norm(k) in qn for k in KEYWORDS["investment_advisory"])
+    if tickers and forecast_hit:
+        scores["forecast_outlook"]["final_score"] = round(max(float(scores["forecast_outlook"]["final_score"]), 0.86), 4)
+        scores["investment_advisory"]["final_score"] = round(max(float(scores["investment_advisory"]["final_score"]), 0.74), 4)
+    elif tickers and advisory_hit and time_ctx == "future_horizon":
+        scores["investment_advisory"]["final_score"] = round(max(float(scores["investment_advisory"]["final_score"]), 0.82), 4)
+
     ranked = sorted(scores.items(), key=lambda x: x[1]["final_score"], reverse=True)
     top_intent = ranked[0][0] if ranked else "unknown"
     top_score = float(ranked[0][1]["final_score"]) if ranked else 0.0
@@ -302,7 +347,11 @@ def score_query(query: str) -> RouterScoreResult:
     for k in ["RSI", "SMA", "MACD", "BOLLINGER", "MA20", "MA50"]:
         if k.lower() in qn:
             indicators.append(k)
-    date_range = "3m" if any(x in qn for x in ["3 thang", "90 ngay", "3 thang gan day", "3 thang qua"]) else None
+    date_range = None
+    if any(x in qn for x in ["3 thang", "90 ngay", "3 thang gan day", "3 thang qua"]):
+        date_range = "3m"
+    elif any(x in qn for x in ["1 thang toi", "mot thang toi", "thang toi", "30 ngay toi"]):
+        date_range = "1m_forward"
 
     logger.info(
         "router_score query=%s top_intent=%s margin=%.4f route=%s needs_planner=%s scores=%s",

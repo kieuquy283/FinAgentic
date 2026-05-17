@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import time
 
 from app.llm.prompts import SYSTEM_PROMPT
 
@@ -11,28 +10,28 @@ class QwenClient:
         self.api_key = os.getenv("QWEN_API_KEY", "").strip()
         self.base_url = os.getenv("QWEN_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1").strip()
         self.model = os.getenv("QWEN_MODEL", "qwen-plus").strip()
+        self.timeout_seconds = float(os.getenv("QWEN_TIMEOUT_SECONDS", "5"))
+        self.last_timeout_used = False
 
     def enabled(self) -> bool:
         return bool(self.api_key)
 
     def synthesize(self, user_prompt: str) -> str:
+        self.last_timeout_used = False
         if not self.enabled():
             return self._mock_fallback()
         try:
             return self._call_qwen(user_prompt)
         except Exception as exc:  # noqa: BLE001
             if self._is_transient(exc):
-                time.sleep(0.6)
-                try:
-                    return self._call_qwen(user_prompt)
-                except Exception:  # noqa: BLE001
-                    return self._mock_fallback()
+                self.last_timeout_used = True
+                return self._mock_fallback()
             return self._mock_fallback()
 
     def _call_qwen(self, user_prompt: str) -> str:
         from openai import OpenAI
 
-        client = OpenAI(api_key=self.api_key, base_url=self.base_url, timeout=20.0)
+        client = OpenAI(api_key=self.api_key, base_url=self.base_url, timeout=self.timeout_seconds)
         resp = client.chat.completions.create(
             model=self.model,
             messages=[
@@ -56,4 +55,3 @@ class QwenClient:
             "Confidence: low.\n"
             "Disclaimer: Thong tin chi de tham khao, khong phai khuyen nghi dau tu ca nhan."
         )
-

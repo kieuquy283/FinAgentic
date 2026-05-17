@@ -1,6 +1,9 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
+import time
 
 from app.schemas import RouterResult
+from app.runtime_diagnostics import get_request_diagnostics
 from app.services.planner_service import planner_route_plan
 from app.services.router_scorer import score_query
 
@@ -11,7 +14,11 @@ def route_query(query: str) -> RouterResult:
     route = scored.route
     needs_planner = scored.needs_planner
     if needs_planner:
+        t0 = time.perf_counter()
         plan = planner_route_plan(query, scored)
+        diag = get_request_diagnostics()
+        if diag is not None and diag.planner_ms == 0.0:
+            diag.planner_ms = (time.perf_counter() - t0) * 1000
         intent = str(plan.get("intent") or intent)
         route = str(plan.get("route") or route)
 

@@ -25,6 +25,11 @@ class RequestDiagnostics:
     analytics_ms: float = 0.0
     guardrails_ms: float = 0.0
     aggregator_ms: float = 0.0
+    planner_ms: float = 0.0
+    rag_ms: float = 0.0
+    llm_ms: float = 0.0
+    fallback_used: bool = False
+    timeout_used: bool = False
 
 
 _DIAG_CTX: contextvars.ContextVar[RequestDiagnostics | None] = contextvars.ContextVar("request_diag", default=None)

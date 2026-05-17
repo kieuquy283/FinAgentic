@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
 from app.services.router_scorer import RouterScoreResult, _intent_to_route
+from app.runtime_diagnostics import get_request_diagnostics
 
 ALLOWED_INTENTS = [
     "company_info",
@@ -50,7 +52,7 @@ def _call_qwen_classifier(prompt: str) -> dict | None:
         client = OpenAI(
             api_key=os.getenv("QWEN_API_KEY", "").strip(),
             base_url=os.getenv("QWEN_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1").strip(),
-            timeout=15.0,
+            timeout=float(os.getenv("QWEN_PLANNER_TIMEOUT_SECONDS", "4")),
         )
         model = os.getenv("QWEN_MODEL", "qwen-plus").strip()
         resp = client.chat.completions.create(
@@ -75,8 +77,13 @@ def _call_qwen_classifier(prompt: str) -> dict | None:
 
 
 def planner_route_plan(query: str, scored: RouterScoreResult) -> dict:
+    diag = get_request_diagnostics()
+    t0 = time.perf_counter()
+    timeout_used = False
     if _qwen_enabled():
         out = _call_qwen_classifier(_planner_prompt(query, scored))
+        if diag is not None:
+            diag.planner_ms = (time.perf_counter() - t0) * 1000
         if out:
             intent = str(out.get("intent") or scored.top_intent)
             route = str(out.get("route") or _intent_to_route(intent))
@@ -85,10 +92,13 @@ def planner_route_plan(query: str, scored: RouterScoreResult) -> dict:
             if route not in ALLOWED_ROUTES:
                 route = _intent_to_route(intent)
             return {"intent": intent, "route": route, "planner_used": True, "reason": str(out.get("reason") or "")}
+        timeout_used = True
+    if diag is not None:
+        diag.planner_ms = (time.perf_counter() - t0) * 1000
+        diag.timeout_used = diag.timeout_used or timeout_used
     return {
         "intent": scored.top_intent,
         "route": _intent_to_route(scored.top_intent),
         "planner_used": False,
-        "reason": "fallback_to_scored_intent",
+        "reason": "fallback_to_scored_intent_or_planner_timeout",
     }
-

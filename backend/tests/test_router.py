@@ -36,3 +36,17 @@ def test_company_info_route():
     r = route_query("FPT niêm yết ở sàn nào?")
     assert r.intent == "company_info"
     assert r.route == "company_direct"
+
+
+def test_forecast_query_fpt_one_month_routes_to_forecast_or_advisory():
+    r = route_query("dự kiến tình hình của fpt trong 1 tháng tới")
+    assert r.intent in ["forecast_outlook", "investment_advisory"]
+    assert r.route == "advisory_llm"
+    assert r.time_context == "future_horizon"
+    assert r.date_range == "1m_forward"
+
+
+def test_forecast_query_sets_need_news_and_need_advice():
+    r = route_query("dự kiến tình hình của fpt trong 1 tháng tới")
+    assert r.need_news is True
+    assert r.need_advice is True

@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
+import time
 
 from sqlalchemy import text
 from app.db import get_engine
@@ -10,6 +12,7 @@ class RagService:
     def search(self, ticker: str, query: str, top_k: int = 5) -> list[EvidenceItem]:
         if not ticker:
             return []
+        t0 = time.perf_counter()
         diag = get_request_diagnostics()
         if diag is not None:
             diag.rag_called = True
@@ -48,6 +51,8 @@ class RagService:
         out: list[EvidenceItem] = []
         for _, r in scored[:top_k]:
             out.append(EvidenceItem(source=r["source"], source_type="rag", ticker=ticker, date=r["date"], content=r["content"]))
+        if diag is not None:
+            diag.rag_ms = (time.perf_counter() - t0) * 1000
         return out
 
     def score_sentiment(self, snippets: list[EvidenceItem]) -> str:

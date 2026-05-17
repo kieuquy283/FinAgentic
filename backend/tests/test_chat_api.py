@@ -82,3 +82,51 @@ def test_healthz_includes_database_diagnostics():
     assert "target" in data["database"]
     assert "prices_table_exists" in data["database"]
     assert "idx_prices_ticker_date" in data["database"]
+
+
+def test_unknown_query_returns_fast_without_aggregator(monkeypatch):
+    import time
+    from app.services.evidence_aggregator import EvidenceAggregator
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("aggregator should not be called for unknown")
+
+    monkeypatch.setattr(EvidenceAggregator, "build", _boom)
+    t0 = time.perf_counter()
+    resp = client.post("/chat", json={"query": "xin chao ban"})
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["intent"] == "unknown"
+    assert elapsed_ms < 100
+
+
+def test_unknown_query_does_not_call_rag_or_llm(monkeypatch):
+    from app.services.rag_service import RagService
+    from app.services.advisory_service import AdvisoryService
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("should not be called for unknown")
+
+    monkeypatch.setattr(RagService, "search", _boom)
+    monkeypatch.setattr(AdvisoryService, "synthesize", _boom)
+
+    resp = client.post("/chat", json={"query": "alo alo"})
+    assert resp.status_code == 200
+    assert resp.json()["intent"] == "unknown"
+
+
+def test_planner_timeout_returns_safe_response(monkeypatch):
+    from app.llm.qwen_client import QwenClient
+
+    monkeypatch.setenv("QWEN_API_KEY", "dummy-key")
+
+    def _timeout(self, user_prompt: str):
+        raise TimeoutError("planner timeout")
+
+    monkeypatch.setattr(QwenClient, "_call_qwen", _timeout)
+    resp = client.post("/chat", json={"query": "FPT co nen mua khong?"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["intent"] in ["investment_advisory", "forecast_outlook"]
+    assert "Disclaimer" in data["answer"] or "disclaimer" in data["answer"].lower()
