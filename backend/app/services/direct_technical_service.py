@@ -19,6 +19,7 @@ class DirectTechnicalResult:
     indicator: str
     window: int | None
     cache_ms: float = 0.0
+    db_latest_date_ms: float = 0.0
     db_ms: float = 0.0
     analytics_ms: float = 0.0
 
@@ -44,7 +45,9 @@ class DirectTechnicalService:
         if spec is None:
             raise ValueError("unsupported indicator")
 
+        t_latest = time.perf_counter()
         latest_date = self.analytics_service.get_latest_price_date(ticker)
+        db_latest_date_ms = (time.perf_counter() - t_latest) * 1000
         base_key = f"indicator:{ticker}:{spec.indicator}:{spec.window}"
         cache_key = f"{base_key}:{latest_date}" if latest_date else base_key
 
@@ -53,6 +56,8 @@ class DirectTechnicalService:
         cache_ms = (time.perf_counter() - t_cache) * 1000
         if cached is not None:
             cached.cache_hit = True
+            cached.cache_ms = cache_ms
+            cached.db_latest_date_ms = db_latest_date_ms
             return cached
 
         required = self._required_points(spec)
@@ -86,6 +91,7 @@ class DirectTechnicalService:
                 window=spec.window,
                 cache_ms=cache_ms,
                 db_ms=db_ms,
+                db_latest_date_ms=db_latest_date_ms,
             )
             set_cached_value(cache_key, result, ttl_seconds=30)
             return result
@@ -111,6 +117,7 @@ class DirectTechnicalService:
             window=spec.window,
             cache_ms=cache_ms,
             db_ms=db_ms,
+            db_latest_date_ms=db_latest_date_ms,
             analytics_ms=analytics_ms,
         )
         set_cached_value(cache_key, result, ttl_seconds=120)

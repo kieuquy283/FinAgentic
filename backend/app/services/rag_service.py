@@ -3,12 +3,16 @@
 from sqlalchemy import text
 from app.db import get_engine
 from app.schemas import EvidenceItem
+from app.runtime_diagnostics import get_request_diagnostics
 
 
 class RagService:
     def search(self, ticker: str, query: str, top_k: int = 5) -> list[EvidenceItem]:
         if not ticker:
             return []
+        diag = get_request_diagnostics()
+        if diag is not None:
+            diag.rag_called = True
         engine = get_engine()
         q = query.lower()
 

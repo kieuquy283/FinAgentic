@@ -3,15 +3,21 @@ from __future__ import annotations
 import os
 import time
 import logging
+import subprocess
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from sqlalchemy import text
+
 from app.cache import get_cache, normalize_query, set_cache
 from app.router import route_query
 from app import scheduler as scheduler_mod
+from app.db import DB_PATH, ensure_prices_index, get_engine, has_prices_index
+from app.runtime_diagnostics import end_request_diagnostics, start_request_diagnostics
 from app.schemas import ChatRequest, ChatResponse, EvidenceItem
 from app.services.advisory_service import AdvisoryService
 from app.services.direct_technical_service import DirectTechnicalService
@@ -19,6 +25,7 @@ from app.services.evidence_aggregator import EvidenceAggregator
 from app.services.guardrails import DISCLAIMER, apply_guardrails
 
 logger = logging.getLogger(__name__)
+APP_START_TS = time.time()
 
 
 def _cors_origins() -> list[str]:
@@ -67,6 +74,30 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok", "uptime_s": round(time.time() - APP_START_TS, 3)}
+
+
+@app.get("/warmup")
+def warmup():
+    engine = get_engine()
+    t0 = time.perf_counter()
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1")).scalar()
+        row = conn.execute(
+            text("SELECT date, close FROM prices WHERE ticker=:ticker ORDER BY date DESC LIMIT 1"),
+            {"ticker": "FPT"},
+        ).mappings().first()
+    return {
+        "status": "ok",
+        "uptime_s": round(time.time() - APP_START_TS, 3),
+        "db_ping_ms": round((time.perf_counter() - t0) * 1000, 3),
+        "fpt_latest_date": str(row["date"]) if row else None,
+        "index_present": has_prices_index(),
+    }
+
+
 @app.get("/")
 def root():
     return {"status": "ok", "app": "FinAgentic"}
@@ -83,6 +114,23 @@ class RefreshRequest(BaseModel):
 
 @app.on_event("startup")
 def startup_event() -> None:
+    ensure_prices_index()
+    db_exists = DB_PATH.exists()
+    db_size = DB_PATH.stat().st_size if db_exists else 0
+    commit = "unknown"
+    try:
+        commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+    except Exception:
+        pass
+    logger.info(
+        "startup ts=%s db_path=%s db_exists=%s db_size_bytes=%s git_commit=%s idx_prices_ticker_date=%s",
+        datetime.now(timezone.utc).isoformat(),
+        str(DB_PATH),
+        db_exists,
+        db_size,
+        commit,
+        has_prices_index(),
+    )
     try:
         scheduler_mod.start_daily_refresh_scheduler()
     except Exception:
@@ -115,14 +163,10 @@ def admin_refresh_status():
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     start = time.perf_counter()
-    route_ms = 0.0
-    cache_ms = 0.0
-    direct_technical_ms = 0.0
-    guardrails_ms = 0.0
-    aggregator_ms = 0.0
+    diag = start_request_diagnostics()
     query = req.query.strip()
     if not query:
-        return _safe_response(
+        resp = _safe_response(
             query=req.query,
             intent="unknown",
             route="unknown",
@@ -130,12 +174,23 @@ def chat(req: ChatRequest):
             warnings=["Cau hoi rong.", "Du lieu dang o che do demo/mock."],
             latency_ms=int((time.perf_counter() - start) * 1000),
         )
+        diag.total_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "chat_diag total_ms=%.2f route_ms=%.2f response_cache_ms=%.2f direct_technical_ms=%.2f indicator_cache_ms=%.2f db_latest_date_ms=%.2f db_prices_ms=%.2f analytics_ms=%.2f guardrails_ms=%.2f aggregator_ms=%.2f direct_technical_used=%s aggregator_called=%s rag_called=%s ensure_fresh_called=%s refresh_if_needed_called=%s external_api_called=%s response_cache_hit=%s indicator_cache_hit=%s",
+            diag.total_ms, diag.route_ms, diag.response_cache_ms, diag.direct_technical_ms, diag.indicator_cache_ms,
+            diag.db_latest_date_ms, diag.db_prices_ms, diag.analytics_ms, diag.guardrails_ms, diag.aggregator_ms,
+            diag.direct_technical_used, diag.aggregator_called, diag.rag_called, diag.ensure_fresh_called,
+            diag.refresh_if_needed_called, diag.external_api_called, diag.response_cache_hit, diag.indicator_cache_hit,
+        )
+        end_request_diagnostics()
+        return resp
 
     key = normalize_query(query)
     t_cache = time.perf_counter()
     cached = get_cache(key)
-    cache_ms = (time.perf_counter() - t_cache) * 1000
+    diag.response_cache_ms = (time.perf_counter() - t_cache) * 1000
     if cached is not None:
+        diag.response_cache_hit = True
         ev = list(cached.evidence)
         ev.append(
             EvidenceItem(
@@ -146,7 +201,7 @@ def chat(req: ChatRequest):
                 content="cache_hit",
             )
         )
-        return ChatResponse(
+        resp = ChatResponse(
             query=cached.query,
             intent=cached.intent,
             route=cached.route,
@@ -156,14 +211,24 @@ def chat(req: ChatRequest):
             guardrails=cached.guardrails,
             latency_ms=int((time.perf_counter() - start) * 1000),
         )
+        diag.total_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "chat_diag total_ms=%.2f route_ms=%.2f response_cache_ms=%.2f direct_technical_ms=%.2f indicator_cache_ms=%.2f db_latest_date_ms=%.2f db_prices_ms=%.2f analytics_ms=%.2f guardrails_ms=%.2f aggregator_ms=%.2f direct_technical_used=%s aggregator_called=%s rag_called=%s ensure_fresh_called=%s refresh_if_needed_called=%s external_api_called=%s response_cache_hit=%s indicator_cache_hit=%s",
+            diag.total_ms, diag.route_ms, diag.response_cache_ms, diag.direct_technical_ms, diag.indicator_cache_ms,
+            diag.db_latest_date_ms, diag.db_prices_ms, diag.analytics_ms, diag.guardrails_ms, diag.aggregator_ms,
+            diag.direct_technical_used, diag.aggregator_called, diag.rag_called, diag.ensure_fresh_called,
+            diag.refresh_if_needed_called, diag.external_api_called, diag.response_cache_hit, diag.indicator_cache_hit,
+        )
+        end_request_diagnostics()
+        return resp
 
     t_route = time.perf_counter()
     router_result = route_query(query)
-    route_ms = (time.perf_counter() - t_route) * 1000
+    diag.route_ms = (time.perf_counter() - t_route) * 1000
     ticker = router_result.tickers[0] if router_result.tickers else ""
 
     if router_result.intent != "unknown" and not ticker:
-        return _safe_response(
+        resp = _safe_response(
             query=query,
             intent=router_result.intent,
             route=router_result.route,
@@ -171,12 +236,28 @@ def chat(req: ChatRequest):
             warnings=["Thieu ticker trong cau hoi.", "Du lieu dang o che do demo/mock."],
             latency_ms=int((time.perf_counter() - start) * 1000),
         )
+        diag.total_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "chat_diag total_ms=%.2f route_ms=%.2f response_cache_ms=%.2f direct_technical_ms=%.2f indicator_cache_ms=%.2f db_latest_date_ms=%.2f db_prices_ms=%.2f analytics_ms=%.2f guardrails_ms=%.2f aggregator_ms=%.2f direct_technical_used=%s aggregator_called=%s rag_called=%s ensure_fresh_called=%s refresh_if_needed_called=%s external_api_called=%s response_cache_hit=%s indicator_cache_hit=%s",
+            diag.total_ms, diag.route_ms, diag.response_cache_ms, diag.direct_technical_ms, diag.indicator_cache_ms,
+            diag.db_latest_date_ms, diag.db_prices_ms, diag.analytics_ms, diag.guardrails_ms, diag.aggregator_ms,
+            diag.direct_technical_used, diag.aggregator_called, diag.rag_called, diag.ensure_fresh_called,
+            diag.refresh_if_needed_called, diag.external_api_called, diag.response_cache_hit, diag.indicator_cache_hit,
+        )
+        end_request_diagnostics()
+        return resp
 
     direct_service = DirectTechnicalService()
     if direct_service.can_handle(router_result, query):
+        diag.direct_technical_used = True
         t_direct = time.perf_counter()
         direct_result = direct_service.handle(query=query, router_result=router_result)
-        direct_technical_ms = (time.perf_counter() - t_direct) * 1000
+        diag.direct_technical_ms = (time.perf_counter() - t_direct) * 1000
+        diag.indicator_cache_ms = direct_result.cache_ms
+        diag.db_latest_date_ms = direct_result.db_latest_date_ms
+        diag.db_prices_ms = direct_result.db_ms
+        diag.analytics_ms = direct_result.analytics_ms
+        diag.indicator_cache_hit = direct_result.cache_hit
 
         t_guard = time.perf_counter()
         guard = apply_guardrails(
@@ -187,7 +268,7 @@ def chat(req: ChatRequest):
             demo_fallback=False,
             runtime_warnings=direct_result.warnings,
         )
-        guardrails_ms = (time.perf_counter() - t_guard) * 1000
+        diag.guardrails_ms = (time.perf_counter() - t_guard) * 1000
         conf = router_result.confidence if guard.passed else "low"
         response = ChatResponse(
             query=req.query,
@@ -200,27 +281,26 @@ def chat(req: ChatRequest):
             latency_ms=int((time.perf_counter() - start) * 1000),
         )
         set_cache(key, response)
+        diag.total_ms = (time.perf_counter() - start) * 1000
         logger.info(
-            "chat_latency total_ms=%.2f route_ms=%.2f cache_ms=%.2f direct_technical_ms=%.2f db_ms=%.2f analytics_ms=%.2f guardrails_ms=%.2f aggregator_ms=%.2f",
-            (time.perf_counter() - start) * 1000,
-            route_ms,
-            cache_ms + direct_result.cache_ms,
-            direct_technical_ms,
-            direct_result.db_ms,
-            direct_result.analytics_ms,
-            guardrails_ms,
-            aggregator_ms,
+            "chat_diag total_ms=%.2f route_ms=%.2f response_cache_ms=%.2f direct_technical_ms=%.2f indicator_cache_ms=%.2f db_latest_date_ms=%.2f db_prices_ms=%.2f analytics_ms=%.2f guardrails_ms=%.2f aggregator_ms=%.2f direct_technical_used=%s aggregator_called=%s rag_called=%s ensure_fresh_called=%s refresh_if_needed_called=%s external_api_called=%s response_cache_hit=%s indicator_cache_hit=%s",
+            diag.total_ms, diag.route_ms, diag.response_cache_ms, diag.direct_technical_ms, diag.indicator_cache_ms,
+            diag.db_latest_date_ms, diag.db_prices_ms, diag.analytics_ms, diag.guardrails_ms, diag.aggregator_ms,
+            diag.direct_technical_used, diag.aggregator_called, diag.rag_called, diag.ensure_fresh_called,
+            diag.refresh_if_needed_called, diag.external_api_called, diag.response_cache_hit, diag.indicator_cache_hit,
         )
+        end_request_diagnostics()
         return response
 
     aggregator = EvidenceAggregator()
     advisory = AdvisoryService()
     try:
+        diag.aggregator_called = True
         t_agg = time.perf_counter()
         ctx = aggregator.build(ticker=ticker, query=query)
-        aggregator_ms = (time.perf_counter() - t_agg) * 1000
+        diag.aggregator_ms = (time.perf_counter() - t_agg) * 1000
     except Exception:
-        return _safe_response(
+        resp = _safe_response(
             query=query,
             intent=router_result.intent,
             route=router_result.route,
@@ -228,6 +308,16 @@ def chat(req: ChatRequest):
             warnings=["Khong the truy cap CSDL du lieu demo.", "Du lieu dang o che do demo/mock."],
             latency_ms=int((time.perf_counter() - start) * 1000),
         )
+        diag.total_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "chat_diag total_ms=%.2f route_ms=%.2f response_cache_ms=%.2f direct_technical_ms=%.2f indicator_cache_ms=%.2f db_latest_date_ms=%.2f db_prices_ms=%.2f analytics_ms=%.2f guardrails_ms=%.2f aggregator_ms=%.2f direct_technical_used=%s aggregator_called=%s rag_called=%s ensure_fresh_called=%s refresh_if_needed_called=%s external_api_called=%s response_cache_hit=%s indicator_cache_hit=%s",
+            diag.total_ms, diag.route_ms, diag.response_cache_ms, diag.direct_technical_ms, diag.indicator_cache_ms,
+            diag.db_latest_date_ms, diag.db_prices_ms, diag.analytics_ms, diag.guardrails_ms, diag.aggregator_ms,
+            diag.direct_technical_used, diag.aggregator_called, diag.rag_called, diag.ensure_fresh_called,
+            diag.refresh_if_needed_called, diag.external_api_called, diag.response_cache_hit, diag.indicator_cache_hit,
+        )
+        end_request_diagnostics()
+        return resp
 
     if router_result.intent == "company_info" and ctx.company_snapshot:
         answer = f"{ctx.company_snapshot.ticker} niem yet tren san {ctx.company_snapshot.exchange}."
@@ -264,7 +354,7 @@ def chat(req: ChatRequest):
             )
         ),
     )
-    guardrails_ms = (time.perf_counter() - t_guard) * 1000
+    diag.guardrails_ms = (time.perf_counter() - t_guard) * 1000
     conf = router_result.confidence if guard.passed else "low"
 
     response = ChatResponse(
@@ -279,15 +369,13 @@ def chat(req: ChatRequest):
     )
 
     set_cache(key, response)
+    diag.total_ms = (time.perf_counter() - start) * 1000
     logger.info(
-        "chat_latency total_ms=%.2f route_ms=%.2f cache_ms=%.2f direct_technical_ms=%.2f db_ms=%.2f analytics_ms=%.2f guardrails_ms=%.2f aggregator_ms=%.2f",
-        (time.perf_counter() - start) * 1000,
-        route_ms,
-        cache_ms,
-        direct_technical_ms,
-        0.0,
-        0.0,
-        guardrails_ms,
-        aggregator_ms,
+        "chat_diag total_ms=%.2f route_ms=%.2f response_cache_ms=%.2f direct_technical_ms=%.2f indicator_cache_ms=%.2f db_latest_date_ms=%.2f db_prices_ms=%.2f analytics_ms=%.2f guardrails_ms=%.2f aggregator_ms=%.2f direct_technical_used=%s aggregator_called=%s rag_called=%s ensure_fresh_called=%s refresh_if_needed_called=%s external_api_called=%s response_cache_hit=%s indicator_cache_hit=%s",
+        diag.total_ms, diag.route_ms, diag.response_cache_ms, diag.direct_technical_ms, diag.indicator_cache_ms,
+        diag.db_latest_date_ms, diag.db_prices_ms, diag.analytics_ms, diag.guardrails_ms, diag.aggregator_ms,
+        diag.direct_technical_used, diag.aggregator_called, diag.rag_called, diag.ensure_fresh_called,
+        diag.refresh_if_needed_called, diag.external_api_called, diag.response_cache_hit, diag.indicator_cache_hit,
     )
+    end_request_diagnostics()
     return response

@@ -124,6 +124,7 @@ def ensure_runtime_tables() -> None:
         for stmt in [s.strip() for s in ddl.split(";") if s.strip()]:
             conn.execute(text(stmt))
         _ensure_compatible_columns(conn)
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_prices_ticker_date ON prices(ticker, date DESC)"))
 
 
 def _ensure_compatible_columns(conn) -> None:
@@ -187,3 +188,16 @@ def _ensure_compatible_columns(conn) -> None:
         for col, decl in cols:
             if not has_col(table, col):
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {decl}"))
+
+
+def ensure_prices_index() -> None:
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_prices_ticker_date ON prices(ticker, date DESC)"))
+
+
+def has_prices_index() -> bool:
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(text("PRAGMA index_list('prices')")).mappings().all()
+    return any(str(r.get("name")) == "idx_prices_ticker_date" for r in rows)

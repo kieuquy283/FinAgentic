@@ -5,12 +5,18 @@ from sqlalchemy import text
 from app.db import get_engine
 from app.ingestion.freshness import is_price_stale
 from app.ingestion.vnstock_ingestion import refresh_if_needed
+from app.runtime_diagnostics import get_request_diagnostics
 
 
 class MarketDataService:
     def ensure_fresh(self, ticker: str) -> dict:
         if not ticker:
             return {"refreshed": False, "warnings": []}
+        diag = get_request_diagnostics()
+        if diag is not None:
+            diag.ensure_fresh_called = True
+            diag.refresh_if_needed_called = True
+            diag.external_api_called = True
         return refresh_if_needed(ticker)
 
     def get_prices(self, ticker: str, limit: int = 90):
