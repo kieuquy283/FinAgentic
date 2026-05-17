@@ -39,3 +39,37 @@ class AnalyticsService:
         if len(prices) < 2:
             raise ValueError("insufficient data for return")
         return round((prices[-1] - prices[0]) / prices[0] * 100, 2)
+
+    def get_latest_close_prices(self, ticker: str, limit: int) -> tuple[list[float], str | None]:
+        if not ticker or limit <= 0:
+            return [], None
+        with get_engine().connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT date, close
+                    FROM prices
+                    WHERE ticker=:ticker
+                    ORDER BY date DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"ticker": ticker, "limit": limit},
+            ).mappings().all()
+        if not rows:
+            return [], None
+        latest_date = str(rows[0]["date"])
+        prices = [float(r["close"]) for r in reversed(rows)]
+        return prices, latest_date
+
+    def get_latest_price_date(self, ticker: str) -> str | None:
+        if not ticker:
+            return None
+        with get_engine().connect() as conn:
+            row = conn.execute(
+                text("SELECT MAX(date) AS latest_date FROM prices WHERE ticker=:ticker"),
+                {"ticker": ticker},
+            ).mappings().first()
+        if not row or not row.get("latest_date"):
+            return None
+        return str(row["latest_date"])

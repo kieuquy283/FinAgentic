@@ -3,15 +3,20 @@ from __future__ import annotations
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BACKEND_DIR / "data"
 DB_PATH = DATA_DIR / "demo_seed.db"
+_ENGINE: Engine | None = None
 
 
 def get_engine():
+    global _ENGINE
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    return create_engine(f"sqlite:///{DB_PATH}", future=True)
+    if _ENGINE is None:
+        _ENGINE = create_engine(f"sqlite:///{DB_PATH}", future=True)
+    return _ENGINE
 
 
 def ensure_runtime_tables() -> None:

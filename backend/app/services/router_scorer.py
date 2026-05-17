@@ -200,6 +200,41 @@ class RouterScoreResult:
     date_range: str | None
 
 
+@dataclass
+class IndicatorSpec:
+    indicator: str
+    window: int | None
+
+
+def parse_indicator_spec(query: str, indicators: list[str] | None = None, date_range: str | None = None) -> IndicatorSpec | None:
+    qn = _norm(query)
+    candidates = [x.upper() for x in (indicators or [])]
+
+    if "return" in qn or "performance" in qn or "loi suat" in qn:
+        if date_range == "3m" or "3 month" in qn or "3 thang" in qn:
+            return IndicatorSpec(indicator="return", window=90)
+        return IndicatorSpec(indicator="return", window=90)
+
+    rsi_match = re.search(r"\brsi\s*(\d{1,3})?\b", qn, flags=re.IGNORECASE)
+    if rsi_match or "RSI" in candidates:
+        window = int(rsi_match.group(1)) if rsi_match and rsi_match.group(1) else 14
+        return IndicatorSpec(indicator="rsi", window=window)
+
+    sma_match = re.search(r"\bsma\s*(\d{1,3})?\b", qn, flags=re.IGNORECASE)
+    if sma_match:
+        window = int(sma_match.group(1)) if sma_match.group(1) else 20
+        return IndicatorSpec(indicator="sma", window=window)
+    if "MA20" in candidates:
+        return IndicatorSpec(indicator="sma", window=20)
+    if "MA50" in candidates:
+        return IndicatorSpec(indicator="sma", window=50)
+    if "SMA" in candidates:
+        return IndicatorSpec(indicator="sma", window=20)
+
+    # TODO: support macd, bollinger, volatility, drawdown in direct path
+    return None
+
+
 def _intent_to_route(intent: str) -> str:
     if intent == "company_info":
         return "company_direct"

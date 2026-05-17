@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,8 +14,11 @@ from app.router import route_query
 from app import scheduler as scheduler_mod
 from app.schemas import ChatRequest, ChatResponse, EvidenceItem
 from app.services.advisory_service import AdvisoryService
+from app.services.direct_technical_service import DirectTechnicalService
 from app.services.evidence_aggregator import EvidenceAggregator
 from app.services.guardrails import DISCLAIMER, apply_guardrails
+
+logger = logging.getLogger(__name__)
 
 
 def _cors_origins() -> list[str]:
@@ -110,7 +114,12 @@ def admin_refresh_status():
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
-    start = time.time()
+    start = time.perf_counter()
+    route_ms = 0.0
+    cache_ms = 0.0
+    direct_technical_ms = 0.0
+    guardrails_ms = 0.0
+    aggregator_ms = 0.0
     query = req.query.strip()
     if not query:
         return _safe_response(
@@ -119,11 +128,13 @@ def chat(req: ChatRequest):
             route="unknown",
             answer="Vui long nhap cau hoi co ticker, vi du: FPT niem yet o san nao?",
             warnings=["Cau hoi rong.", "Du lieu dang o che do demo/mock."],
-            latency_ms=int((time.time() - start) * 1000),
+            latency_ms=int((time.perf_counter() - start) * 1000),
         )
 
     key = normalize_query(query)
+    t_cache = time.perf_counter()
     cached = get_cache(key)
+    cache_ms = (time.perf_counter() - t_cache) * 1000
     if cached is not None:
         ev = list(cached.evidence)
         ev.append(
@@ -143,25 +154,13 @@ def chat(req: ChatRequest):
             evidence=ev,
             confidence=cached.confidence,
             guardrails=cached.guardrails,
-            latency_ms=int((time.time() - start) * 1000),
+            latency_ms=int((time.perf_counter() - start) * 1000),
         )
 
+    t_route = time.perf_counter()
     router_result = route_query(query)
+    route_ms = (time.perf_counter() - t_route) * 1000
     ticker = router_result.tickers[0] if router_result.tickers else ""
-
-    aggregator = EvidenceAggregator()
-    advisory = AdvisoryService()
-    try:
-        ctx = aggregator.build(ticker=ticker, query=query)
-    except Exception:
-        return _safe_response(
-            query=query,
-            intent=router_result.intent,
-            route=router_result.route,
-            answer="He thong du lieu chua san sang. Vui long chay lai script seed du lieu backend.",
-            warnings=["Khong the truy cap CSDL du lieu demo.", "Du lieu dang o che do demo/mock."],
-            latency_ms=int((time.time() - start) * 1000),
-        )
 
     if router_result.intent != "unknown" and not ticker:
         return _safe_response(
@@ -170,7 +169,64 @@ def chat(req: ChatRequest):
             route=router_result.route,
             answer="Khong tim thay ticker hop le. Vui long dung ma co phieu nhu FPT, HPG, VCB, VNM.",
             warnings=["Thieu ticker trong cau hoi.", "Du lieu dang o che do demo/mock."],
-            latency_ms=int((time.time() - start) * 1000),
+            latency_ms=int((time.perf_counter() - start) * 1000),
+        )
+
+    direct_service = DirectTechnicalService()
+    if direct_service.can_handle(router_result, query):
+        t_direct = time.perf_counter()
+        direct_result = direct_service.handle(query=query, router_result=router_result)
+        direct_technical_ms = (time.perf_counter() - t_direct) * 1000
+
+        t_guard = time.perf_counter()
+        guard = apply_guardrails(
+            intent=router_result.intent,
+            answer=direct_result.answer,
+            evidence=direct_result.evidence,
+            has_numeric=True,
+            demo_fallback=False,
+            runtime_warnings=direct_result.warnings,
+        )
+        guardrails_ms = (time.perf_counter() - t_guard) * 1000
+        conf = router_result.confidence if guard.passed else "low"
+        response = ChatResponse(
+            query=req.query,
+            intent=router_result.intent,
+            route=router_result.route,
+            answer=f"{direct_result.answer}\n{guard.disclaimer}",
+            evidence=direct_result.evidence,
+            confidence=conf,
+            guardrails=guard,
+            latency_ms=int((time.perf_counter() - start) * 1000),
+        )
+        set_cache(key, response)
+        logger.info(
+            "chat_latency total_ms=%.2f route_ms=%.2f cache_ms=%.2f direct_technical_ms=%.2f db_ms=%.2f analytics_ms=%.2f guardrails_ms=%.2f aggregator_ms=%.2f",
+            (time.perf_counter() - start) * 1000,
+            route_ms,
+            cache_ms + direct_result.cache_ms,
+            direct_technical_ms,
+            direct_result.db_ms,
+            direct_result.analytics_ms,
+            guardrails_ms,
+            aggregator_ms,
+        )
+        return response
+
+    aggregator = EvidenceAggregator()
+    advisory = AdvisoryService()
+    try:
+        t_agg = time.perf_counter()
+        ctx = aggregator.build(ticker=ticker, query=query)
+        aggregator_ms = (time.perf_counter() - t_agg) * 1000
+    except Exception:
+        return _safe_response(
+            query=query,
+            intent=router_result.intent,
+            route=router_result.route,
+            answer="He thong du lieu chua san sang. Vui long chay lai script seed du lieu backend.",
+            warnings=["Khong the truy cap CSDL du lieu demo.", "Du lieu dang o che do demo/mock."],
+            latency_ms=int((time.perf_counter() - start) * 1000),
         )
 
     if router_result.intent == "company_info" and ctx.company_snapshot:
@@ -189,6 +245,7 @@ def chat(req: ChatRequest):
     else:
         answer = "Chua hieu ro cau hoi. Vui long thu 1 trong 5 cau hoi demo."
 
+    t_guard = time.perf_counter()
     guard = apply_guardrails(
         intent=router_result.intent,
         answer=answer,
@@ -207,6 +264,7 @@ def chat(req: ChatRequest):
             )
         ),
     )
+    guardrails_ms = (time.perf_counter() - t_guard) * 1000
     conf = router_result.confidence if guard.passed else "low"
 
     response = ChatResponse(
@@ -217,8 +275,19 @@ def chat(req: ChatRequest):
         evidence=ctx.evidence,
         confidence=conf,
         guardrails=guard,
-        latency_ms=int((time.time() - start) * 1000),
+        latency_ms=int((time.perf_counter() - start) * 1000),
     )
 
     set_cache(key, response)
+    logger.info(
+        "chat_latency total_ms=%.2f route_ms=%.2f cache_ms=%.2f direct_technical_ms=%.2f db_ms=%.2f analytics_ms=%.2f guardrails_ms=%.2f aggregator_ms=%.2f",
+        (time.perf_counter() - start) * 1000,
+        route_ms,
+        cache_ms,
+        direct_technical_ms,
+        0.0,
+        0.0,
+        guardrails_ms,
+        aggregator_ms,
+    )
     return response
