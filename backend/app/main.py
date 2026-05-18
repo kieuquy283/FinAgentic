@@ -21,9 +21,11 @@ from app.db import (
     ensure_prices_index,
     ensure_runtime_tables,
     get_database_target_public,
+    get_database_host_masked,
     get_db_dialect,
     get_engine,
     has_prices_index,
+    is_database_url_set,
     table_exists,
 )
 from app.runtime_diagnostics import end_request_diagnostics, start_request_diagnostics
@@ -122,8 +124,10 @@ def health():
 @app.get("/healthz")
 def healthz():
     db_ok = True
-    prices_count = None
+    prices_count = 0
     prices_exists = False
+    dialect = get_db_dialect()
+    idx_exists = False
     try:
         with get_engine().connect() as conn:
             conn.execute(text("SELECT 1")).scalar()
@@ -131,18 +135,24 @@ def healthz():
             if prices_exists:
                 row = conn.execute(text("SELECT COUNT(*) AS c FROM prices")).mappings().first()
                 prices_count = int(row["c"]) if row else 0
+            idx_exists = has_prices_index()
     except Exception:
         db_ok = False
     return {
         "status": "ok" if db_ok else "degraded",
         "uptime_seconds": round(time.time() - APP_START_TS, 3),
+        "database_dialect": dialect,
+        "database_ok": db_ok,
+        "prices_table_exists": prices_exists,
+        "prices_row_count": prices_count,
+        "idx_prices_ticker_date_exists": idx_exists if db_ok else False,
         "database": {
-            "dialect": get_db_dialect(),
+            "dialect": dialect,
             "connection_ok": db_ok,
             "target": get_database_target_public(),
             "prices_table_exists": prices_exists,
             "prices_count": prices_count,
-            "idx_prices_ticker_date": has_prices_index() if db_ok else False,
+            "idx_prices_ticker_date": idx_exists if db_ok else False,
         },
     }
 
@@ -192,8 +202,11 @@ def startup_event() -> None:
     except Exception:
         pass
     logger.info(
-        "startup ts=%s db_path=%s db_exists=%s db_size_bytes=%s git_commit=%s idx_prices_ticker_date=%s",
+        "startup ts=%s database_url_set=%s database_dialect=%s database_host_masked=%s db_path=%s db_exists=%s db_size_bytes=%s git_commit=%s idx_prices_ticker_date=%s",
         datetime.now(timezone.utc).isoformat(),
+        is_database_url_set(),
+        get_db_dialect(),
+        get_database_host_masked(),
         str(DB_PATH),
         db_exists,
         db_size,

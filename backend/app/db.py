@@ -14,6 +14,8 @@ _ENGINE: Engine | None = None
 
 def get_database_url() -> str:
     db_url = os.getenv("DATABASE_URL", "").strip()
+    if db_url and db_url.startswith("postgresql://"):
+        raise RuntimeError("Use psycopg v3 URL format: postgresql+psycopg://...")
     if db_url:
         return db_url
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -57,6 +59,20 @@ def get_database_target_public() -> str:
     port = url.port or 5432
     database = url.database or ""
     return f"{host}:{port}/{database}"
+
+
+def is_database_url_set() -> bool:
+    return bool(os.getenv("DATABASE_URL", "").strip())
+
+
+def get_database_host_masked() -> str:
+    engine = get_engine()
+    if engine.dialect.name == "sqlite":
+        return "local-file"
+    host = str(engine.url.host or "localhost")
+    if len(host) <= 4:
+        return "*" * len(host)
+    return f"{host[:2]}***{host[-2:]}"
 
 
 def table_exists(table: str) -> bool:
