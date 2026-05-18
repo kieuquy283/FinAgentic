@@ -10,6 +10,7 @@ class AnalyticsService:
     def get_close_prices(self, ticker: str, limit: int = 120) -> list[float]:
         if not ticker:
             return []
+        ticker = ticker.strip().upper()
         with get_engine().connect() as conn:
             rows = conn.execute(
                 text("SELECT close FROM prices WHERE ticker=:ticker ORDER BY date DESC LIMIT :limit"),
@@ -43,6 +44,7 @@ class AnalyticsService:
     def get_latest_close_prices(self, ticker: str, limit: int) -> tuple[list[float], str | None]:
         if not ticker or limit <= 0:
             return [], None
+        ticker = ticker.strip().upper()
         with get_engine().connect() as conn:
             rows = conn.execute(
                 text(
@@ -65,6 +67,7 @@ class AnalyticsService:
     def get_latest_price_date(self, ticker: str) -> str | None:
         if not ticker:
             return None
+        ticker = ticker.strip().upper()
         with get_engine().connect() as conn:
             row = conn.execute(
                 text("SELECT MAX(date) AS latest_date FROM prices WHERE ticker=:ticker"),

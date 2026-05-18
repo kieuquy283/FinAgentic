@@ -9,6 +9,7 @@ class CompanyService:
     def get_company(self, ticker: str):
         if not ticker:
             return None
+        ticker = ticker.strip().upper()
         engine = get_engine()
         with engine.connect() as conn:
             return conn.execute(

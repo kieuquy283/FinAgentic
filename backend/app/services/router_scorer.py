@@ -96,6 +96,7 @@ FUTURE_HORIZON = [
     "trien vong", "ky vong", "outlook", "forecast",
 ]
 TICKERS = ["FPT", "HPG", "VCB", "VNM"]
+TICKER_STOPWORDS = {"SMA", "RSI", "MACD", "MA20", "MA50", "VND", "USD", "HOSE", "HNX", "UPCOM"}
 INDICATORS = ["RSI", "SMA", "MACD", "BOLLINGER", "MA20", "MA50"]
 
 
@@ -164,7 +165,14 @@ def _keyword_score(query: str, intent: str) -> tuple[float, list[str]]:
 
 def _extract_tickers(query: str) -> list[str]:
     up = query.upper()
-    return [t for t in TICKERS if t in up]
+    tickers: list[str] = [t for t in TICKERS if re.search(rf"\b{re.escape(t)}\b", up)]
+    generic = re.findall(r"\b[A-Z]{3,5}\b", query)
+    for code in generic:
+        if code in TICKER_STOPWORDS:
+            continue
+        if code not in tickers:
+            tickers.append(code)
+    return tickers
 
 
 def _time_direction(query: str) -> str:
